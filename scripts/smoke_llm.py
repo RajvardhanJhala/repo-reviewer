@@ -4,6 +4,8 @@ Run:  python -m scripts.smoke_llm
 """
 import time
 
+from sentence_transformers import SentenceTransformer
+
 from llm.router import router
 
 PROMPT = [{"role": "user", "content": "Reply with exactly one word: pong"}]
@@ -14,7 +16,6 @@ for lane in ("fast", "quality"):
           f"tokens={r.prompt_tokens}+{r.completion_tokens} latency={r.latency_s:.2f}s -> {r.text.strip()!r}")
 
 print("\nEmbedding smoke test (bge-m3, local, first run downloads ~2GB)...")
-from sentence_transformers import SentenceTransformer  # noqa: E402
 
 t0 = time.perf_counter()
 model = SentenceTransformer("BAAI/bge-m3")

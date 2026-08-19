@@ -11,6 +11,7 @@ fallback path is real and not just configured.
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ os.environ.setdefault("CEREBRAS_API_KEY", settings.cerebras_api_key)
 litellm.suppress_debug_info = True
 
 Lane = Literal["quality", "fast"]
-
+log = logging.getLogger(__name__)
 
 @dataclass
 class LLMResponse:
@@ -61,7 +62,7 @@ class UsageStats:
 
     def summary(self) -> dict[str, Any]:
         lat = sorted(self.latencies)
-        pct = lambda p: lat[min(len(lat) - 1, int(p * len(lat)))] if lat else 0.0  # noqa: E731
+        pct = lambda p: lat[min(len(lat) - 1, int(p * len(lat)))] if lat else 0.0
         return {
             "calls": self.calls,
             "fallbacks": self.fallbacks,
@@ -120,9 +121,11 @@ class LLMRouter:
                 )
                 self.stats.record(out)
                 return out
-            except Exception as e:  # rate limit, auth, timeout, provider outage...
+            except Exception as e:
+                log.warning("lane=%s model=%s failed (%s); trying next", lane, model, type(e).__name__)
                 last_err = e
                 continue
+            
 
         raise RuntimeError(f"All providers failed for lane={lane}. Last error: {last_err}")
 

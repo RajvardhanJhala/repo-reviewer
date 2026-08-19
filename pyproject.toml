@@ -1,0 +1,7 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "RUF"]
+ignore = ["E731"]        # lambdas assigned to names are fine in small helpers
