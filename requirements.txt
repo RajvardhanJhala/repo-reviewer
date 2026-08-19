@@ -1,0 +1,29 @@
+# --- model layer ---
+litellm>=1.50
+python-dotenv>=1.0
+pydantic>=2.7
+pydantic-settings>=2.3
+requests>=2.32
+
+# --- retrieval (Phase 1+) ---
+sentence-transformers>=3.0
+faiss-cpu>=1.8
+rank-bm25>=0.2.2
+tree-sitter>=0.23
+tree-sitter-python>=0.23
+tree-sitter-javascript>=0.23
+
+# --- github ---
+PyGithub>=2.3
+GitPython>=3.1
+unidiff>=0.7
+
+# --- orchestration / api (later phases) ---
+langgraph>=0.2
+langchain-core>=0.3
+flask>=3.0
+gunicorn>=22.0
+
+# --- dev ---
+pytest>=8.0
+ruff>=0.5
