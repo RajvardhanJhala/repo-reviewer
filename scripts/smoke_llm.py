@@ -11,7 +11,7 @@ from llm.router import router
 PROMPT = [{"role": "user", "content": "Reply with exactly one word: pong"}]
 
 for lane in ("fast", "quality"):
-    r = router.chat(PROMPT, lane=lane, max_tokens=10)
+    r = router.chat(PROMPT, lane=lane, max_tokens=300)
     print(f"[{lane:7}] model={r.model_used:45} fell_back={r.fell_back} "
           f"tokens={r.prompt_tokens}+{r.completion_tokens} latency={r.latency_s:.2f}s -> {r.text.strip()!r}")
 

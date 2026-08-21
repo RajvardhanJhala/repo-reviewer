@@ -34,12 +34,12 @@ class Settings(BaseSettings):
     # Router lanes: which model handles which kind of work.
     # "quality" -> long context / careful reasoning (PR review, synthesis)
     # "fast"    -> short iterative agent-loop calls (planner, Q&A tools, classification)
-    quality_model: str = Field(default="gemini/gemini-2.5-flash")
-    fast_model: str = Field(default="groq/llama-3.3-70b-versatile")
+    quality_model: str = Field(default="gemini/gemini-3.6-flash")
+    fast_model: str = Field(default="groq/openai/gpt-oss-120b")
     fallback_models: list[str] = Field(
         default=[
-            "openrouter/deepseek/deepseek-chat-v3-0324:free",
-            "cerebras/llama-3.3-70b",
+            "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+            "groq/openai/gpt-oss-20b",
         ]
     )
 
