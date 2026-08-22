@@ -1,12 +1,18 @@
 # Change Log — Claude Code Sessions
 
 Every change Claude makes to this codebase is logged here: **what** changed, **why**, and the
-reasoning behind it. Concept boxes (`> 💡`) explain any Agentic-AI / RAG / LLM ideas the change touches.
+reasoning behind it. Concept boxes explain the ideas each change touches, layered by level:
+
+- 💡 **(CS)** — computer-science fundamentals: hashing, parsing, indexes, complexity
+- 💡 **(SE)** — software-engineering practice: testing, config, dependency injection
+- 💡 **(ML)** — machine-learning: embeddings, transformers, vector math
+- 💡 **(RAG/Agents)** — retrieval-augmented generation and agentic-AI patterns
+
 Newest entries at the bottom, grouped by session date.
 
 ---
 
-## 2026-08-22 — Session 1: Cleanup, environment repair, model migration
+## 2026-08-22 — Session 1 (Phase 0): Cleanup, environment repair, model migration
 
 ### 1. Deleted orphaned folders at `C:\Agentic-RAG\` root
 
@@ -14,13 +20,35 @@ Newest entries at the bottom, grouped by session date.
 
 **Why:** `repo-reviewer-phase0` was a leftover unzipped copy. Before deleting, we verified it held
 nothing unique: its nested repo sat at the *same* commit (`01b822a`) as the real clone with a clean
-working tree, its outer `.git` tracked only a gitlink (a pointer, no actual file content), and its
-`.env` differed from the clone's only in line endings (all 8 values hash-identical). The three cache
-folders belonged to a venv created in the wrong directory.
+working tree, its outer `.git` tracked only a gitlink (a pointer, not file content), and its `.env`
+differed from the clone's only in line endings — proven by hashing every value in both files and
+comparing the hashes, never the values themselves. The three cache folders belonged to a venv
+created in the wrong directory.
 
-**Logic:** Never delete before proving nothing unique is lost — compare commits, working-tree status,
-and file hashes first. One working directory (`repo-reviewer\`) removes ambiguity about "which copy
-am I editing?"
+**Logic:** Never delete before proving nothing unique is lost — compare commits, working-tree
+status, and file hashes first. One working directory removes "which copy am I editing?" ambiguity.
+
+> 💡 **(CS) Cryptographic hash functions.** A hash function maps any input to a fixed-size
+> fingerprint. A *cryptographic* one (SHA-256) adds two properties: tiny input changes produce
+> completely different outputs (avalanche effect), and finding two inputs with the same output is
+> computationally infeasible (collision resistance). That makes hashes usable as *identity*:
+>
+> ```python
+> import hashlib
+> hashlib.sha256(b"def f(): return 1").hexdigest()[:16]   # 'cd802a81ac4cf7ae'
+> hashlib.sha256(b"def f(): return 2").hexdigest()[:16]   # '994d3d2b1b81658b'  ← 1 char changed, everything changed
+> ```
+>
+> We used this twice today: comparing `.env` values without revealing them (equal hashes ⇒ equal
+> values), and later as the backbone of incremental indexing (entry 8). Git itself is built on
+> this idea — every commit ID is a hash of the repository's entire content state, which is why
+> two repos at commit `01b822a` are *provably* byte-identical in their tracked files.
+
+> 💡 **(CS) Content-addressable storage & gitlinks.** Git stores objects under their own hash
+> ("content addressing"): identical content is stored once, and naming a hash names exact content.
+> A *gitlink* is a special entry where a repo records only "a sub-repository exists here at commit
+> X" — a 40-character pointer, no files. That's why the outer `phase0` repo could be deleted
+> safely: its one commit contained a pointer, not code.
 
 ---
 
@@ -29,62 +57,108 @@ am I editing?"
 **What:** Added empty dirs `indexer/ qa/ review/ graph/ api/ eval/ docker/`, each containing an
 empty `.gitkeep` file.
 
-**Why:** These are homes for later build phases (indexing, Q&A, PR review, orchestration graph,
-API, evaluation, deployment). Git cannot track empty directories — it tracks files only — so the
-conventional workaround is a zero-byte `.gitkeep` inside each.
+**Why:** Homes for later build phases. Git tracks *files*, never directories — a directory exists
+in git only as a path prefix on some file — so the convention is a zero-byte `.gitkeep` placeholder.
 
-**Logic:** Scaffolding the layout now means every future phase drops code into a pre-agreed place,
-and the repo structure documents the roadmap.
+> 💡 **(RAG/Agents) What RAG is, from first principles.** An LLM's knowledge lives in its
+> weights — "parametric" knowledge, frozen at training time, fuzzy, and it has never seen your
+> repo. But an LLM is also an excellent *reader* of whatever you place in its context window.
+> RAG (Retrieval-Augmented Generation) exploits that: **store your documents outside the model,
+> retrieve the few most relevant pieces per question, and paste them into the prompt.**
+>
+> ```
+> question ──▶ retriever ──▶ top-k relevant chunks ──▶ LLM(context = chunks + question) ──▶ cited answer
+> ```
+>
+> Why not paste the whole repo? Cost (you pay per token), latency, context limits, and — most
+> underrated — *focus*: models answer measurably better from 5 relevant chunks than from 500
+> pages containing the answer somewhere. The retriever's quality therefore bounds the whole
+> system's quality, which is why Phase 1 spends 1.5 weeks on it.
+>
+> The scaffold mirrors the pipeline: **indexer** (make code searchable) → **qa** (answer with
+> retrieval) → **review** (apply it to PR diffs) → **graph** (orchestrate agents) → **eval**
+> (measure quality) → **api/docker** (serve it).
 
-> 💡 **Concept — anatomy of an agentic RAG system.** The folder names mirror the standard pipeline:
-> **indexer** turns the codebase into searchable vectors/keywords; **qa** answers questions by
-> retrieving relevant chunks and letting an LLM reason over them (that's RAG — Retrieval-Augmented
-> Generation: instead of hoping the model "knows" your code, you *retrieve* the relevant snippets
-> and paste them into the prompt); **review** applies that to PR diffs; **graph** wires the steps
-> into an agent workflow (LangGraph — an agent is an LLM that decides *which tool to call next* in
-> a loop, rather than answering in one shot); **eval** measures whether answers are actually good.
+> 💡 **(RAG/Agents) What makes an AI system "agentic".** A plain LLM call is one-shot:
+> prompt in, text out. An *agent* is an LLM in a loop with tools: it sees a goal, *decides which
+> tool to call* (search the code, read a file, look up a symbol), observes the result, and
+> decides again — until it can answer. The model's output alternates between "thoughts" and
+> structured tool calls; the surrounding program executes the calls and feeds results back.
+> Phases 2–4 build exactly this loop with LangGraph.
 
 ---
 
 ### 3. Created `.venv` inside `repo-reviewer\`, installed `requirements.txt`
 
 **What:** Fresh virtualenv (Python 3.13.7) at `repo-reviewer\.venv\`, then
-`pip install -r requirements.txt` (litellm, pydantic-settings, sentence-transformers, faiss-cpu,
-PyGithub, langgraph, pytest, ruff, …).
+`pip install -r requirements.txt`. Verified: `pytest -q` → 3 passed, `ruff check .` → clean.
 
-**Why:** The old venv lived at the parent directory level — orphaned once we settled on
-`repo-reviewer\` as the only working dir. A venv should live inside the project it serves.
+**Why:** The old venv lived at the parent-directory level — orphaned once `repo-reviewer\` became
+the only working dir. A venv belongs inside the project it serves.
 
-**Logic:** Verified immediately: `pytest -q` → 3 passed, `ruff check .` → clean.
+> 💡 **(SE) Virtual environments.** Python resolves `import faiss` by searching a list of
+> directories (`sys.path`). A venv is a private copy of that search space: its own `python.exe`
+> and `site-packages`, so *this* project's `faiss 1.15` can't collide with another project's
+> `faiss 1.7`. The `requirements.txt` makes the environment reproducible: any machine can rebuild
+> it with one command. (Docker, in Phase 6, is the same idea extended to the whole OS.)
 
-> 💡 **Concept — the guardrail tests.** The 3 tests protect the *agentic* part of this project:
-> an agent that can post to GitHub is an LLM with write access to the real world. The tests assert
-> (a) a repo **allowlist** — the client refuses any repo not explicitly permitted, (b) **dry-run
-> mode** — actions print instead of executing until Phase 5, (c) the client class physically has no
-> `approve`/`merge`/`push` methods. This is defense-in-depth for agent safety: don't just prompt
-> the model to behave — make dangerous actions structurally impossible.
+> 💡 **(RAG/Agents) Guardrails: safety by construction, not by prompt.** The 3 tests protect the
+> agentic part of the project. An agent that can post to GitHub is an LLM with write access to
+> the real world — and LLMs can be manipulated (see prompt injection, Phase 5). So the safety
+> rules live in *code*, where no clever prompt can reach them:
+>
+> ```python
+> # gh/client.py — the pattern
+> if full_name not in settings.allowed_repos:          # 1. allowlist: refuse unknown repos
+>     raise PermissionError(...)
+> if settings.dry_run:                                 # 2. dry-run: log instead of act
+>     log.info("DRY RUN: would post ..."); return
+> # 3. and there simply is no approve()/merge()/push() method to call
+> ```
+>
+> Layer 3 is the strongest form: a capability the code doesn't have is a capability no
+> jailbreak can invoke. This "defense in depth" — allowlist + dry-run + structural absence —
+> is the single most portfolio-worthy safety idea in the project.
+
+> 💡 **(SE) Testing with mocks.** The guard tests never touch the real GitHub API — they inject
+> fake objects and assert on *behavior* ("a disallowed repo raises `PermissionError`"). Mocking
+> keeps tests fast, free, and deterministic, and it's the same trick that later lets the indexer
+> tests run without a 2GB embedding model (entry 8, dependency injection).
 
 ---
 
 ### 4. Moved API keys from `.env.example` into `.env`; restored `.env.example`
 
-**What:** The real credentials had been pasted into `.env.example` (the *tracked* template file)
-instead of `.env` (the *gitignored* secrets file). Values were moved into `.env` programmatically
-(never printed to screen), then `.env.example` was restored to placeholders with
-`git checkout -- .env.example`.
+**What:** Real credentials had been pasted into `.env.example` (the *tracked* template) instead of
+`.env` (the *gitignored* secrets file). Values were moved programmatically (never printed), then
+`git checkout -- .env.example` restored the template. Verified no commit in history ever carried
+a real key.
 
-**Why:** `.env.example` is committed to git and pushed to GitHub. Real keys in it would have been
-published by the next `git add . && git push`. `.env` is listed in `.gitignore`, so keys there
-never leave the machine. We verified git history was clean — no commit ever contained a real key.
+**Why:** `.env.example` is committed and pushed — real keys in it would have been published by the
+next `git push`. `.env` never leaves the machine.
 
-**Logic:** The whole point of the `.env` / `.env.example` split: the example documents *which*
-variables exist (safe to publish), the real file holds *values* (never published). Also reverted
-a `.env.example` line someone added to `.gitignore` — ignoring an already-tracked file does
-nothing; git keeps tracking it, which gives false comfort.
+**Logic:** The `.env` / `.env.example` split: the example documents *which* variables exist (safe
+to publish), the real file holds *values* (never published). Also reverted a `.env.example` line
+added to `.gitignore` — ignoring an already-tracked file does nothing (git keeps tracking it),
+which is worse than nothing: it *looks* protected.
 
-**Gotcha discovered:** with `KEY=` empty followed by an inline `# comment`, pydantic-settings
-reads the *comment text as the value*. That made earlier diagnostics claim keys were "filled"
-when they held `# https://...`. Once a real value is present before the comment, parsing is correct.
+> 💡 **(SE) Secrets management & 12-factor config.** Configuration that varies by deployment
+> (keys, endpoints, flags) belongs in the *environment*, not in code — so the same code runs in
+> dev/CI/prod with different credentials, and secrets stay out of version control. The escalation
+> path as stakes rise: `.env` file → CI secret stores → vault services with rotation. A leaked
+> key on GitHub is found by scanner bots in *minutes* — treat any pushed secret as compromised
+> and rotate it immediately.
+
+> 💡 **(SE) Parsers are exact; a gotcha found today.** With `KEY=` empty followed by an inline
+> `# comment`, pydantic-settings reads **the comment text as the value**:
+>
+> ```
+> GEMINI_API_KEY=            # https://aistudio.google.com
+>                ↑ value becomes "# https://aistudio.google.com"  (non-empty!)
+> ```
+>
+> Every "is the key set?" check answered *yes* while every API call failed. Lesson: when
+> debugging config, inspect what the parser *parsed*, not what the file *looks like*.
 
 ---
 
@@ -99,81 +173,392 @@ when they held `# https://...`. Once a real value is present before the comment,
 | fallback 1 | `openrouter/deepseek/deepseek-chat-v3-0324:free` | `openrouter/nvidia/nemotron-3-super-120b-a12b:free` |
 | fallback 2 | `cerebras/llama-3.3-70b` | `groq/openai/gpt-oss-20b` |
 
-**Why:** After fixing the keys, every provider still failed — but the error changed from
-`AuthenticationError` to `NotFoundError`. That distinction was the diagnostic: auth now worked,
-the *model names* were stale. Google's API literally replied *"gemini-2.5-flash is no longer
-available to new users, use gemini-3.6-flash"*; Groq had decommissioned all Llama chat models;
-the DeepSeek free route vanished from OpenRouter's list.
+**Why:** After fixing the keys, every provider still failed — but the error *changed* from
+`AuthenticationError` to `NotFoundError`. That was the diagnostic: auth now worked; the model
+names were stale. Google's API literally replied *"gemini-2.5-flash is no longer available to
+new users, use gemini-3.6-flash"*; Groq had decommissioned all Llama chat models.
 
-**Logic:** Each provider's live model list was queried via API, then every candidate was tested
-with a real completion call before being chosen. Rejected candidates, with reasons:
+**Logic:** Each provider's live model list was fetched via API; every candidate was tested with a
+real completion before selection. Rejected: `groq/qwen/qwen3.6-27b` (leaks raw `<think>` blocks
+into its answer), `gemini/gemini-flash-latest` (a floating alias, 75s vs 1.78s for the pinned
+ID — pin exact versions), Cerebras (no key set; only added noise to every fallback chain).
 
-- `groq/qwen/qwen3.6-27b` — leaks raw `<think>…</think>` reasoning into its answer text.
-- `gemini/gemini-flash-latest` — a floating alias that took **75s** vs 1.78s for the pinned ID.
-  Pin exact model versions; aliases change under you.
-- Cerebras dropped entirely — its key is empty (optional), so it only added a noisy
-  `Missing credentials` error at the end of every fallback chain. Re-add when a key exists.
+> 💡 **(ML) What "calling an LLM" actually is.** An LLM API call sends a list of messages; the
+> provider runs them through a transformer that repeatedly predicts a probability distribution
+> over its vocabulary and samples the next token — *autoregressive generation*, one token at a
+> time, each conditioned on everything before it. You pay per token in and out; latency scales
+> with output length. Everything else (SDKs, "chat", tool calls) is packaging around this loop.
 
-> 💡 **Concept — model router with lanes and fallbacks.** `llm/router.py` implements a common
-> production pattern: a **"quality" lane** (slower, smarter model for careful work like PR review)
-> and a **"fast" lane** (cheap, low-latency model for the many small calls an agent loop makes —
-> planning, classification, tool selection). If a lane's primary model fails, the router walks a
-> **fallback chain** so one provider outage doesn't take the system down. `litellm` makes this
-> possible by giving every provider (Google, Groq, OpenRouter, …) one uniform calling interface.
+> 💡 **(RAG/Agents) The router pattern: lanes + fallback chains.** `llm/router.py` implements
+> two production ideas. **Lanes** match model to workload: a *quality* lane (careful, long-context
+> reasoning — PR review) and a *fast* lane (an agent loop makes many small calls — planning,
+> classification — where latency × call-count dominates). **Fallback chains** handle the fact
+> that providers fail (outages, rate limits, deprecations): on error, try the next model in the
+> list, so one provider's bad day doesn't take the system down. `litellm` makes this practical
+> by giving every provider one uniform interface:
+>
+> ```python
+> for model in [primary, *fallbacks]:
+>     try:
+>         return litellm.completion(model=model, messages=msgs)
+>     except Exception as e:
+>         last_err = e            # log and try the next lane member
+> raise RuntimeError(f"all providers failed: {last_err}")
+> ```
 
-> 💡 **Concept — model deprecation.** Hosted LLMs retire on a timescale of months. Any config that
-> hard-codes model IDs will silently rot; the errors it produces (`NotFound`, `BadRequest`) look
-> like auth bugs. Diagnostic rule of thumb: `AuthenticationError` = key problem,
-> `NotFoundError` = model-name problem.
-
-> 💡 **Concept — reasoning tokens vs `max_tokens`.** Modern "reasoning" models think in hidden
-> tokens *before* writing the visible answer, and that thinking bills against `max_tokens`. At
-> `max_tokens=10`, every candidate model spent the whole budget thinking and returned
-> `content=None` — while reporting 80+ completion tokens used. Practical rules: give reasoning
-> models a real budget (hundreds of tokens even for one-word answers), and never assume
-> `response.content` is non-None. `scripts/smoke_llm.py` still calls with `max_tokens=10`;
-> a guard in `router.chat` is a known TODO.
+> 💡 **(RAG/Agents) Model deprecation — an operational reality.** Hosted models retire on a
+> timescale of *months*. Hard-coded model IDs silently rot, and the resulting errors masquerade
+> as auth bugs. Diagnostic rule of thumb: `AuthenticationError` ⇒ key problem; `NotFoundError` ⇒
+> model-name problem; `RateLimitError` ⇒ quota. Production systems monitor deprecation notices
+> and keep model IDs in config — exactly why ours live in `config.py`, not scattered in code.
 
 ---
 
 ### 6. Raised `max_tokens` 10 → 300 in `scripts/smoke_llm.py`
 
-**What:** The single completion call in the smoke script now passes `max_tokens=300` instead of 10.
+**What:** The smoke test's completion call now passes `max_tokens=300`.
 
-**Why:** The first full smoke run *connected* to both lanes but printed empty answers (`''`) —
-`gpt-oss-120b` reported 10 completion tokens used yet produced no visible text. That is the
-reasoning-token issue from entry 5 in action: the entire 10-token budget went to hidden thinking,
-leaving zero for the answer. A smoke test that "passes" while proving nothing about text output
-is worse than a failing one.
+**Why:** The first full run *connected* to both lanes but printed empty answers — `gpt-oss-120b`
+reported 10 completion tokens used, yet produced no visible text. The entire budget went to
+hidden reasoning. A smoke test that "passes" while proving nothing is worse than a failing one.
 
-**Logic:** 300 tokens is cheap (fractions of a cent / free tier) and leaves headroom for any
-reasoning model's thinking phase. After the fix, both lanes returned the expected `'pong'`.
+> 💡 **(ML) Tokens and tokenization (BPE).** Models don't read characters or words — they read
+> *tokens*, subword units from a fixed vocabulary learned by byte-pair encoding (roughly:
+> repeatedly merge the most frequent adjacent pairs). "process_refund" might be
+> `process`+`_`+`ref`+`und`. Everything is priced and limited in tokens: context windows,
+> `max_tokens`, API bills. Rule of thumb: ~4 characters ≈ 1 token in English; code tokenizes
+> less efficiently.
+
+> 💡 **(ML) Reasoning tokens vs `max_tokens`.** "Reasoning" models generate hidden
+> chain-of-thought tokens *before* the visible answer — and those bill against `max_tokens`:
+>
+> ```
+> max_tokens=10:   [10 thinking tokens][budget exhausted]        → content=None
+> max_tokens=300:  [~50 thinking tokens]["pong"]                 → content="pong"
+> ```
+>
+> Two practical rules: give reasoning models a real budget even for one-word answers, and never
+> assume `response.content` is non-None. (A guard for this in `router.chat` is a standing TODO.)
+
+---
 
 ### 7. Phase 0 milestone: PASSED ✅
-
-Final `python -m scripts.smoke_llm` results (2026-08-22):
 
 | Check | Result |
 |---|---|
 | fast lane | `groq/openai/gpt-oss-120b` → `'pong'`, 0.56s, no fallback |
 | quality lane | `gemini/gemini-3.6-flash` → `'pong'`, 2.36s, no fallback |
-| embeddings | `bge-m3` local, dim=1024, cosine(code, question)=**0.635**, 8.6s cached (388s incl. first download) |
+| embeddings | `bge-m3` local, dim=1024, cosine(code, question)=**0.635**, 8.6s cached |
 | guard tests | `pytest -q` → 3 passed |
 | lint | `ruff check .` → clean |
 
-The 0.635 cosine score means the embedding model rates the code snippet and the natural-language
-question as clearly related (unrelated text pairs typically score near 0.2–0.4 with normalized
-embeddings) — retrieval will be able to match questions to code in Phase 1.
+> 💡 **(ML) Embeddings — meaning as geometry.** An embedding model maps text to a vector (here:
+> 1024 numbers) such that *similar meanings land near each other*. Similarity is measured by the
+> angle between vectors — **cosine similarity**:
+>
+> ```python
+> import numpy as np
+> # cos(θ) = (a · b) / (|a| |b|);  for unit-length vectors this is just the dot product
+> a = model.encode("def process_refund(order_id):", normalize_embeddings=True)
+> b = model.encode("how are refunds handled?",      normalize_embeddings=True)
+> float(a @ b)          # 0.635 — same topic, different wording
+> ```
+>
+> 0.635 between *code* and a *natural-language question* is the number that makes RAG-over-code
+> work: questions and their answering code land close together in vector space, so nearest-
+> neighbor search can connect them. Unrelated pairs typically score ~0.2–0.4 on this model.
+>
+> How does a model learn this? **Contrastive training**: show it millions of (query, relevant
+> passage) pairs and adjust weights so matching pairs score high and mismatched pairs low.
+> `bge-m3` is such a model, small enough to run locally — which means embedding costs nothing
+> and hits no rate limits, the property that makes per-PR re-indexing (Phase 4) free.
 
-**Still uncommitted:** scaffold dirs, `scripts/__init__.py`, `config.py` model changes,
-`smoke_llm.py` token fix, this changelog. Awaiting go-ahead to commit.
+---
 
-**Known TODO carried forward:** `router.chat` has no guard for `content=None` from a reasoning
-model that exhausts its budget — any Phase 1 code assuming non-empty text will hit this edge.
+## 2026-08-22 — Session 2 (Phase 1): AST-aware indexing (core build)
 
-> 💡 **Concept — embeddings (the smoke test's second half).** An embedding model (here `bge-m3`,
-> running locally) converts text into a vector of numbers such that *similar meanings land close
-> together*. The smoke test embeds a code line (`def process_refund(...)`) and a natural-language
-> question ("how are refunds handled?") and checks their **cosine similarity** — a score near 1
-> means the model can match questions to relevant code. That matching is the heart of the RAG
-> retrieval step Phase 1 will build with FAISS (a fast vector-search index).
+### 8. Built the `indexer/` package
+
+**What:** Six new modules + 20 new tests (23 total passing) + `docs/chunking.md`:
+
+- `chunker.py` — tree-sitter AST chunking for Python/JS; markdown by heading; config kept whole
+- `symbols.py` — symbol table: `{name → definition locations + reference locations}`
+- `embedder.py` — lazy bge-m3 wrapper (nothing loads the 2GB model until vectors are needed)
+- `store.py` — FAISS (dense) + BM25 (sparse) hybrid index, RRF fusion, incremental updates
+- `pipeline.py` — repo walker tying it together; `__main__.py` — CLI (`index` / `search` / `symbol`)
+
+**Milestone results (indexed repo-reviewer itself):** 20 files → 132 chunks, 91 symbols.
+Full index ~6 min (CPU embeddings); no-op re-index ~13 s with **zero** re-embeds.
+Exact-identifier query `post_review_summary` → the exact method (`gh/client.py:59-64`) at rank 1.
+Natural-language "how does fallback between models work?" → `llm/router.py` + its `chat` method.
+`symbol chat` → definition `llm/router.py:85`, reference `scripts/smoke_llm.py:14`.
+
+The design decisions, bottom-up:
+
+#### 8a. Parsing: from characters to structure
+
+> 💡 **(CS) Parsers and ASTs.** Source code is stored as flat text, but it *means* a tree: a
+> module contains classes, classes contain methods, methods contain statements. A **parser**
+> rebuilds that tree — the **Abstract Syntax Tree** — from text, using the language's grammar.
+> This is the front half of every compiler. `tree-sitter` gives us fast, error-tolerant parsers
+> for ~any language behind one API:
+>
+> ```python
+> from tree_sitter import Language, Parser
+> import tree_sitter_python
+>
+> tree = Parser(Language(tree_sitter_python.language())).parse(b"""
+> class PaymentService:
+>     def process_refund(self, order_id):
+>         return {"ok": True}
+> """)
+> # module
+> # └── class_definition  name="PaymentService"          ← node.start_point = (row, col)
+> #     └── block
+> #         └── function_definition  name="process_refund"
+> ```
+>
+> Every node knows its exact byte/line range — which is what makes precise citations
+> (`payments.py:142-198`) possible for free.
+
+#### 8b. Chunking: AST boundaries, not byte counts
+
+Naive RAG chunking ("every 500 characters, 50 overlap") is hostile to code: it splits functions
+mid-body, separates signatures from docstrings, and orphans methods from their class names. Full
+write-up in [`docs/chunking.md`](chunking.md). Our rules:
+
+| Construct | Chunk |
+|---|---|
+| function / method | one chunk each; methods carry `parent_symbol` = class name |
+| class | one **skeleton** chunk: signatures + class-level code, method bodies elided to `...` |
+| module-level code | contiguous runs of imports/constants → `(module)` chunks |
+| >120-line function | split at *statement* boundaries, signature repeated in every part |
+| markdown / config | by heading / kept whole |
+
+**Nothing is lost** — a test asserts every non-blank source line appears in ≥1 chunk.
+
+> 💡 **(RAG/Agents) The context-header trick.** Each chunk is embedded with a location prefix:
+>
+> ```
+> # repo-reviewer/gh/client.py :: GitHubClient :: post_review_summary (lines 59-64)
+> def post_review_summary(self, full_name, number, body):
+>     ...
+> ```
+>
+> Without it, `def save(self)` from two different classes embeds almost identically. With it,
+> the vector encodes *where the code lives* — and the citation every answer needs travels
+> attached to the chunk. Cheap, and one of the highest-leverage tricks in RAG-over-code.
+
+> 💡 **(RAG/Agents) The class-skeleton chunk.** The class chunk keeps every signature and
+> class-level statement but elides method bodies:
+>
+> ```python
+> class PaymentService:
+>     """Handles refunds."""
+>     retries = 3
+>     def process_refund(self, order_id):
+>         ...
+>     def audit(self):
+>         ...
+> ```
+>
+> It reads as an API summary — ideal for "what does PaymentService do?" — while each method's
+> full body lives in its own chunk for detail questions. Two retrieval granularities, no
+> duplicated bodies, nothing lost.
+
+#### 8c. Dense retrieval: vectors + FAISS
+
+> 💡 **(CS) Nearest-neighbor search and its cost.** "Find the 5 most similar chunks" =
+> **k-nearest-neighbor search** in 1024-dimensional space. Brute force compares the query
+> against every vector: O(n·d) per query — for 132 chunks × 1024 dims, microseconds; FAISS's
+> `IndexFlatIP` does exactly this (`IP` = inner product; our vectors are unit-normalized, so
+> inner product *is* cosine similarity). At millions of vectors you'd switch to **approximate**
+> indexes (HNSW graphs, IVF clustering) that trade a little recall for orders-of-magnitude
+> speed. Knowing when brute force is fine — here — is itself an engineering decision.
+
+#### 8d. Sparse retrieval: BM25, and why code needs it
+
+> 💡 **(CS) Inverted indexes.** Keyword search doesn't scan documents; it inverts them:
+> `{term → list of documents containing it}` — the same structure as a book index. Lookup
+> becomes O(1) per term. This 60-year-old idea still powers every search engine.
+
+> 💡 **(CS→ML) BM25 in one paragraph.** BM25 ranks documents by summing, per query term:
+> *term frequency* (more occurrences → more relevant, with diminishing returns — the `k1`
+> saturation), × *inverse document frequency* (rare terms carry more signal than common ones),
+> × a length normalization (long documents don't win just by being long). It's the strongest
+> "classic" ranking function — and on *exact identifiers*, it beats embeddings outright:
+> embeddings blur `process_refund` toward "refund-related things", while BM25 matches it
+> *exactly*.
+>
+> Our tokenizer is code-aware — each identifier is indexed as itself **and** its sub-words:
+>
+> ```python
+> tokenize("PaymentService.process_refund")
+> # ['paymentservice', 'payment', 'service', 'process_refund', 'process', 'refund']
+> #   exact ↑ (for identifier queries)      split ↑ (for natural-language queries)
+> ```
+
+#### 8e. Fusion: combining two retrievers that don't speak the same language
+
+> 💡 **(RAG/Agents) Reciprocal Rank Fusion.** BM25 scores (unbounded, e.g. 14.2) and cosine
+> similarities (−1…1) are incomparable — you can't average them. RRF ignores scores entirely
+> and uses only each system's *ranking*: `score(d) = Σ 1/(60 + rank_i(d))`. Worked example:
+>
+> ```
+> chunk          dense rank   bm25 rank   RRF = 1/(60+r₁) + 1/(60+r₂)
+> process_refund     1            1        1/61 + 1/61 = 0.0328   ← both agree: wins
+> charge             2            —        1/62        = 0.0161
+> verify_token       —            2        1/62        = 0.0161
+> ```
+>
+> Chunks that *both* retrievers like float to the top; a chunk only one likes still surfaces.
+> No calibration, no tuned weights, empirically hard to beat — the standard baseline for
+> hybrid retrieval. (The constant 60 damps the gap between rank 1 and rank 2 so one system
+> can't dominate.)
+
+#### 8f. Incremental indexing: hashing again
+
+> 💡 **(CS→RAG) Change detection via content hashing.** The index stores a manifest
+> `{file path → sha256(content)}`. On re-index, hash every current file and compare:
+>
+> ```
+> hash unchanged → keep existing chunks + vectors     (free)
+> hash changed   → re-chunk + re-embed just that file (cheap)
+> path missing   → drop its chunks                    (free)
+> ```
+>
+> Measured today: full index ~6 min, no-op re-index 13 s, one-file change re-embeds only that
+> file. Same idea git uses to detect modified files. This is what makes webhook-triggered
+> per-PR re-indexing (Phase 4) feel instant instead of taking minutes per push.
+
+#### 8g. The symbol table: identity, not similarity
+
+> 💡 **(CS→RAG) Symbol tables — a compilers idea reused for agents.** Compilers track
+> `{name → where it's declared, where it's used}` to resolve references. We build the same
+> structure while walking the ASTs, and expose it as a *tool*:
+>
+> ```python
+> symbols.lookup("chat")
+> # {"definitions": [{"path": "llm/router.py", "line": 85}],
+> #  "references":  [{"path": "scripts/smoke_llm.py", "line": 14}]}
+> ```
+>
+> "Where is X defined?" is an **identity** question. Vector search answers "what is *similar*
+> to X?" — the wrong instrument, and it can never be sure it found *the* definition. Giving
+> the future Q&A agent both tools — fuzzy semantic search *and* exact symbol lookup — is what
+> enables multi-hop navigation: search → find symbol → jump to definition → read callers.
+
+#### 8h. The engineering choice that shaped everything: dependency injection
+
+> 💡 **(SE) Inject dependencies; don't import them.** Every component takes `embed_fn` as an
+> argument rather than importing the model:
+>
+> ```python
+> index = HybridIndex(data_dir, embed_fn=get_embedder())   # production: real bge-m3
+> index = HybridIndex(data_dir, embed_fn=FakeEmbedder())   # tests: deterministic, instant
+> ```
+>
+> One parameter is the difference between a test suite that needs a 2GB download and GPU-minutes
+> per run, and one that finishes in **1.2 seconds**. The fake embedder hashes tokens into vector
+> buckets — crude, but "similar text → similar vector" holds well enough to test ranking logic.
+> Same principle as the mocked GitHub client in the guard tests (entry 3): inject what's slow,
+> expensive, or external.
+
+**Remaining Phase 1 work (next step):** the 25-question eval set with hit-rate@5 comparison —
+naive vs AST vs AST+hybrid — over the seeded target repos. That table is the phase's headline
+artifact.
+
+> 💡 **(RAG/Agents) Why evaluate retrieval at all.** Every design choice above (AST boundaries,
+> headers, hybrid, skeletons) is a *hypothesis* about what improves retrieval. **Hit-rate@k**
+> ("for what fraction of questions does the correct file:line region appear in the top k
+> results?") turns hypotheses into numbers on a fixed question set. Without it you're tuning by
+> vibes; with it, every future change (a different embedding model, a new chunk size) gets a
+> before/after score. Building the measuring stick *before* optimizing is the discipline that
+> separates engineering from alchemy.
+
+---
+
+### 9. Enabled embedding progress bars for large batches
+
+**What:** `indexer/embedder.py` now passes `show_progress_bar=len(texts) > 8` to
+`model.encode()` — indexing runs show a live per-batch tqdm bar; single-query embeds
+during search stay silent.
+
+**Why:** A full index run is minutes of silent CPU work with no feedback until the vectors
+file lands. sentence-transformers batches internally (32 texts per batch) and can report
+each batch; the size threshold keeps search queries from printing a bar per call.
+
+> 💡 **(SE) Observability of long-running work.** Batch jobs should emit progress
+> proportional to their duration. Two subtleties met here: Python buffers *stdout* when
+> piped (run `python -u` to stream prints live), while tqdm writes to *stderr*, which is
+> unbuffered — so the bar streams even when prints don't. And when a process is silent by
+> design, the filesystem is the fallback progress API: watching for `vectors.npy` to appear
+> tells you which stage completed.
+
+---
+
+### 10. Retrieval eval harness — and the negative result that redesigned search
+
+**What:** Built `eval/` (naive baseline chunker, 35-question ground-truth set, 4-config
+harness), which immediately produced a *negative* result, whose diagnosis led to
+query-routed hybrid search in `store.py`. Final numbers in `docs/retrieval_eval.md`.
+
+**The sequence, because the order is the lesson:**
+
+1. **Target repos too small.** The seeded eval targets (`reviewer-target-py`, 183 lines;
+   `reviewer-target-mixed`, 72) would give every retriever ~100% — meaningless comparison.
+   Evaluated against repo-reviewer itself (21 files, 141 AST / 79 naive chunks) instead;
+   the harness is repo-agnostic for when real targets exist.
+2. **First run:** AST beat naive (92% vs 84% hit@5, dense) — but **hybrid scored 68%,
+   worse than dense alone.** The expected headline ("AST+hybrid wins") was simply false
+   on this corpus.
+3. **Diagnosis** (dumped the 7 lost questions): BM25 kept top-ranking *documentation* —
+   `CHANGELOG_CLAUDE.md` and `chunking.md` describe the code in the exact words the
+   questions use, lexically shadowing the code itself. Compounding it, fusion depth 50
+   (of 140 chunks!) let BM25's weak tail displace dense's precise hits.
+4. **Measured fixes:** depth 50→10 (68→72%), BM25 weight 0.5 (→84%) — still under
+   dense's 92%. On all-prose questions, *any* BM25 vote hurts.
+5. **The eval set itself was biased:** all 25 questions were natural-language; zero
+   exact-identifier queries — the query class BM25 exists for and Phase 2's agent tools
+   will issue constantly. Added 10 identifier queries as a labeled category.
+6. **Per-category results:** identifiers with equal-weight fusion → 100% hit@5 (dense
+   alone: 80%). Prose with any fusion → worse. Two query populations, opposite optima.
+7. **Resolution — query routing** in `search()`: identifier-shaped queries (one token,
+   no spaces) get equal-weight RRF fusion at depth 10; prose is served dense-only.
+   2 new routing tests; 25 total passing.
+
+**Final table (hit@5): naive+dense 80% → AST + routed hybrid 94%.** Identifiers 100%,
+prose 92%, no configuration sacrificed. Also fixed mid-eval: ground-truth line regions
+pointing into `store.py` had drifted after editing it — re-verified before publishing.
+
+> 💡 **(RAG/Agents) Negative results are the eval paying rent.** The whole point of
+> building the measuring stick before optimizing: "hybrid is better" was a *hypothesis*,
+> and on this corpus it was false. Without the harness we'd have shipped a retriever 24
+> points worse at prose questions and called it an upgrade. When a benchmark contradicts
+> the textbook, the benchmark is doing its job — diagnose, don't discard.
+
+> 💡 **(RAG/Agents) Lexical shadowing — docs vs code.** Any documented repo contains
+> prose *describing* its code in the same vocabulary users ask questions in. Lexical
+> search (BM25) will rank the description above the implementation; dense embeddings
+> with context headers separate them far better. This failure mode grows with
+> documentation quality — ironically, this project's teaching changelog made its own
+> retrieval benchmark harder.
+
+> 💡 **(RAG/Agents) Query routing.** Retrieval traffic is not one population: prose
+> questions and identifier lookups have *opposite* optimal retrievers. Rather than one
+> compromise pipeline, classify the query (here: a regex for identifier shape — zero
+> cost, no LLM call) and dispatch to the right one. Same principle as the LLM router's
+> fast/quality lanes in entry 5: match the machinery to the request.
+
+> 💡 **(RAG/Agents) Evals are code too — they rot.** Ground-truth answer regions pinned
+> to line numbers silently drifted when the file they pointed into was edited. Caught
+> because hit-rates shifted without a retrieval change. Mitigations: re-verify after
+> editing indexed files, or anchor answers to symbols resolved at eval time. An eval
+> that can silently go stale will — treat its fixtures with the same suspicion as code.
+
+> 💡 **(SE) Don't tune on your test set — at least know when you are.** Fusion depth and
+> weights were chosen by measuring on the same 35 questions we report. At this scale
+> that's unavoidable, but it's *overfitting risk*: the honest guards used here were
+> preferring standard values (depth 10, equal weight) over squeezing maxima, categorical
+> decisions (route/don't route) over fine-grained knobs, and disclosing the practice.
+> The proper fix at larger scale is a held-out split: tune on one half, report the other.

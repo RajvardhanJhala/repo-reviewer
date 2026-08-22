@@ -1,0 +1,391 @@
+{
+ "repo": "repo-reviewer",
+ "note": "Ground truth authored 2026-08-22 against the working tree; line ranges are the answer regions. A retrieval counts as a hit when a returned chunk overlaps any answer region (same path, intersecting lines). Two query kinds: 'natural' (25 how/where questions) and 'identifier' (10 exact symbol names, the query style agent tools issue).",
+ "questions": [
+  {
+   "q": "How does fallback between models work when a provider fails?",
+   "answers": [
+    {
+     "path": "llm/router.py",
+     "start": 85,
+     "end": 130
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Where is the list of fallback models configured?",
+   "answers": [
+    {
+     "path": "config.py",
+     "start": 39,
+     "end": 44
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Which repositories is the bot allowed to act on, and where is that list parsed?",
+   "answers": [
+    {
+     "path": "config.py",
+     "start": 30,
+     "end": 32
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Where does the code refuse to write to a repo that is not on the allowlist?",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 42,
+     "end": 49
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How are inline review comments posted to GitHub?",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 51,
+     "end": 57
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Where is dry-run mode enforced so GitHub writes only print instead of posting?",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 42,
+     "end": 64
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How is a repository cloned programmatically?",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 25,
+     "end": 31
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How is the diff of a pull request fetched?",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 33,
+     "end": 39
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Which embedding model is used and how is it loaded lazily?",
+   "answers": [
+    {
+     "path": "indexer/embedder.py",
+     "start": 1,
+     "end": 31
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How are functions that are too long split into multiple chunks?",
+   "answers": [
+    {
+     "path": "indexer/chunker.py",
+     "start": 223,
+     "end": 265
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How does a class become a skeleton chunk with method bodies elided?",
+   "answers": [
+    {
+     "path": "indexer/chunker.py",
+     "start": 268,
+     "end": 314
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How are markdown files split into chunks?",
+   "answers": [
+    {
+     "path": "indexer/chunker.py",
+     "start": 317,
+     "end": 335
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How are code identifiers tokenized for keyword search?",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 44,
+     "end": 55
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How are the dense and BM25 rankings merged into a single result list?",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 102,
+     "end": 127
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How does incremental re-indexing decide which files need re-embedding?",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 72,
+     "end": 98
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Which files are written to disk when the index is persisted?",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 148,
+     "end": 154
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How can I look up where a symbol is defined and where it is referenced?",
+   "answers": [
+    {
+     "path": "indexer/symbols.py",
+     "start": 41,
+     "end": 99
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Which directories are skipped when scanning a repository for indexing?",
+   "answers": [
+    {
+     "path": "indexer/pipeline.py",
+     "start": 21,
+     "end": 23
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "What terminal command indexes a repository and what subcommands exist?",
+   "answers": [
+    {
+     "path": "indexer/__main__.py",
+     "start": 1,
+     "end": 40
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Where are latency percentiles like p50 computed for LLM calls?",
+   "answers": [
+    {
+     "path": "llm/router.py",
+     "start": 47,
+     "end": 75
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Which models serve the fast lane and the quality lane?",
+   "answers": [
+    {
+     "path": "config.py",
+     "start": 34,
+     "end": 38
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Where are API keys loaded from the environment?",
+   "answers": [
+    {
+     "path": "config.py",
+     "start": 13,
+     "end": 25
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "Why is AST-aware chunking better than fixed-size chunking?",
+   "answers": [
+    {
+     "path": "docs/chunking.md",
+     "start": 1,
+     "end": 18
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "What checks does CI run on every push?",
+   "answers": [
+    {
+     "path": ".github/workflows/ci.yml",
+     "start": 1,
+     "end": 12
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "How is the context header for a chunk constructed?",
+   "answers": [
+    {
+     "path": "indexer/chunker.py",
+     "start": 71,
+     "end": 81
+    }
+   ],
+   "kind": "natural"
+  },
+  {
+   "q": "post_review_summary",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 59,
+     "end": 64
+    }
+   ]
+  },
+  {
+   "q": "_guard",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "gh/client.py",
+     "start": 42,
+     "end": 49
+    }
+   ]
+  },
+  {
+   "q": "tokenize",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 44,
+     "end": 55
+    }
+   ]
+  },
+  {
+   "q": "search_dense_only",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 129,
+     "end": 138
+    }
+   ]
+  },
+  {
+   "q": "iter_source_files",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/pipeline.py",
+     "start": 26,
+     "end": 36
+    }
+   ]
+  },
+  {
+   "q": "MAX_CHUNK_LINES",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/chunker.py",
+     "start": 20,
+     "end": 20
+    }
+   ]
+  },
+  {
+   "q": "RRF_K",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/store.py",
+     "start": 31,
+     "end": 31
+    }
+   ]
+  },
+  {
+   "q": "resolve_references",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/symbols.py",
+     "start": 72,
+     "end": 91
+    }
+   ]
+  },
+  {
+   "q": "chunk_file",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "indexer/chunker.py",
+     "start": 93,
+     "end": 104
+    }
+   ]
+  },
+  {
+   "q": "LLMResponse",
+   "kind": "identifier",
+   "answers": [
+    {
+     "path": "llm/router.py",
+     "start": 36,
+     "end": 45
+    }
+   ]
+  }
+ ]
+}
