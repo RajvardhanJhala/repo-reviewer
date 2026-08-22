@@ -1,8 +1,11 @@
 """Provider-agnostic LLM layer.
 
 Two "lanes" so callers express *intent* rather than picking providers:
-    chat(messages, lane="quality")  -> Gemini 2.5 Flash (long context, careful work)
-    chat(messages, lane="fast")     -> Groq Llama 3.3 70B (low-latency loops)
+    chat(messages, lane="quality")  -> settings.quality_model (long context, careful work)
+    chat(messages, lane="fast")     -> settings.fast_model (low-latency agent loops)
+
+Pass tools=[...] (OpenAI function schema) and the response carries normalized
+tool_calls: [{"id", "name", "arguments"}] with arguments as a JSON string.
 
 If the lane's primary provider rate-limits or errors, LiteLLM transparently
 falls back down `settings.fallback_models`. Every call records which model
@@ -40,6 +43,7 @@ class LLMResponse:
     completion_tokens: int
     latency_s: float
     fell_back: bool
+    tool_calls: list[dict[str, str]] = field(default_factory=list)
     raw: Any = field(repr=False, default=None)
 
 
@@ -110,8 +114,14 @@ class LLMRouter:
                     **kwargs,
                 )
                 usage = getattr(resp, "usage", None)
+                message = resp.choices[0].message
+                tool_calls = [
+                    {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
+                    for tc in (getattr(message, "tool_calls", None) or [])
+                ]
                 out = LLMResponse(
-                    text=resp.choices[0].message.content or "",
+                    text=message.content or "",
+                    tool_calls=tool_calls,
                     model_used=model,
                     prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
                     completion_tokens=getattr(usage, "completion_tokens", 0) or 0,

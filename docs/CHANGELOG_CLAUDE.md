@@ -562,3 +562,75 @@ pointing into `store.py` had drifted after editing it — re-verified before pub
 > preferring standard values (depth 10, equal weight) over squeezing maxima, categorical
 > decisions (route/don't route) over fine-grained knobs, and disclosing the practice.
 > The proper fix at larger scale is a held-out split: tune on one half, report the other.
+
+---
+
+## 2026-08-22 — Session 3 (Phase 2): Codebase Q&A agent
+
+### 11. Built the `qa/` package — a from-scratch ReAct agent with validated citations
+
+**What:** Tool-calling support in `llm/router.py`; four read-only tools (`qa/tools.py`);
+the agent loop (`qa/agent.py`); CLI (`qa/__main__.py`); 7 new tests (32 passing);
+`docs/qa_agent.md` with a captured multi-hop trace.
+
+**Why from-scratch instead of LangGraph:** the plan allows either. Building the loop by
+hand teaches the mechanics (the point of this project), reuses our router's lanes/
+fallbacks/stats, and adds zero dependencies. LangGraph arrives in Phase 4 where the
+parallel-reviewer pipeline genuinely needs orchestration.
+
+**Milestone (live run):** the multi-hop question "if Groq goes down, what takes over,
+in what order, where configured?" was answered correctly in 6 steps / 5 tool calls
+(search → lookup_symbol → two read_files), all 6 citations validated. Poetically, Groq
+was actually rate-limiting during the run — 3 of 6 calls served by the OpenRouter
+fallback — so the agent described the fallback chain *while running on it*. The trace
+also shows step 1 passing a bad argument, receiving the error string, and self-
+correcting on step 2.
+
+**Also fixed:** Windows consoles are cp1252; the model emitted a Unicode hyphen and
+`print()` crashed the CLI *after* a successful run. `sys.stdout.reconfigure(
+encoding="utf-8", errors="replace")` at CLI startup — model output is untrusted in
+encoding, not just content.
+
+> 💡 **(RAG/Agents) The ReAct loop — what "agent" actually means in code.** The model
+> never executes anything. Each turn it either emits structured tool calls or a final
+> answer. Our program runs the calls and appends results as `role="tool"` messages, so
+> the conversation *is* the agent's working memory:
+>
+> ```
+> while steps < max_steps:
+>     resp = llm(messages, tools=schemas)
+>     if not resp.tool_calls: return validate(resp.text)
+>     messages += [assistant_turn(resp), *[tool_result(tc) for tc in resp.tool_calls]]
+> ```
+>
+> Multi-hop reasoning (search → read → follow reference → answer) emerges from this
+> loop without being programmed anywhere. The step cap matters: an agent that can loop
+> is an agent that can loop forever, so on exhaustion we force an answer from gathered
+> evidence rather than dying silently.
+
+> 💡 **(RAG/Agents) Tool schemas = function calling.** Tools are advertised to the model
+> as JSON Schemas (name, description, typed parameters). The provider constrains
+> generation so tool-call output parses as valid JSON against the schema. The
+> *descriptions* are prompt engineering — "use lookup_symbol for where-is-X questions"
+> steers tool choice more than any code. Errors are returned as strings, not raised:
+> a tool error the model can read is a tool error the model can recover from — observed
+> live in the milestone trace (bad arg on step 1, corrected on step 2).
+
+> 💡 **(RAG/Agents) Citation validation as a hallucination guard.** LLMs fabricate
+> plausible-looking citations. Every `path:start-end` in a final answer is checked
+> against the working tree — file exists, range within it. Invalid ones are *flagged,
+> never dropped*: a fabricated citation marks the claim it supports as suspect, which
+> is information the human needs. This converts "trust me" into "check line 41".
+
+> 💡 **(RAG/Agents) Agent tool safety.** `read_file` resolves every path and rejects
+> anything outside the repo root (`../../etc/passwd` → error string). Same principle as
+> the GitHub client guards (entry 3): the model chooses tool *arguments*, and arguments
+> are untrusted input. All four tools are read-only; caps (200 lines/read, k≤10)
+> bound each call's blast radius and context cost.
+
+> 💡 **(SE) The injection pattern, third time.** The agent takes `chat_fn` as a
+> constructor argument, exactly as the index takes `embed_fn` and the guard tests take
+> mock clients. A `ScriptedLLM` returning queued responses lets tests assert on the
+> *loop's* behavior — tools executed, results fed back, step cap enforced, citations
+> validated — in milliseconds, no API, deterministic. The entire agentic control flow
+> is tested without a single LLM call.
