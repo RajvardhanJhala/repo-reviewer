@@ -93,6 +93,7 @@ class LLMRouter:
         temperature: float = 0.1,
         max_tokens: int = 2048,
         json_mode: bool = False,
+        timeout_s: float = 90.0,
         **kwargs: Any,
     ) -> LLMResponse:
         primary = self._lane_models[lane]
@@ -105,11 +106,15 @@ class LLMRouter:
                 extra: dict[str, Any] = {}
                 if json_mode:
                     extra["response_format"] = {"type": "json_object"}
+                # Gemini 3 warns temperature<1.0 "can cause infinite loops and
+                # degraded reasoning" - let those models use their default.
+                if not model.startswith("gemini/"):
+                    extra["temperature"] = temperature
                 resp = litellm.completion(
                     model=model,
                     messages=messages,
-                    temperature=temperature,
                     max_tokens=max_tokens,
+                    timeout=timeout_s,
                     **extra,
                     **kwargs,
                 )

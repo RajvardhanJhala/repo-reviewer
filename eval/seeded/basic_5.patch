@@ -1,0 +1,14 @@
+--- /dev/null
++++ b/scripts/export_report.py
+@@ -0,0 +1,11 @@
++import os
++import subprocess
++
++
++def exportReport(items, out_path):
++    total = 0
++    for i in range(1, len(items)):
++        total += items[i]["amount"]
++    avg = total / len(items)
++    os.system("copy report.tmp " + out_path)
++    return {"total": total, "average": avg}
