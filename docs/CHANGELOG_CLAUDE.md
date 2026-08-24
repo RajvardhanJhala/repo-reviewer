@@ -1,20 +1,152 @@
-# Change Log — Claude Code Sessions
+# repo-reviewer — The Build Log
 
-Every change Claude makes to this codebase is logged here: **what** changed, **why**, and the
-reasoning behind it. Concept boxes explain the ideas each change touches, layered by level:
+*A change log written to teach: every change, why it was made, and the ideas behind it —
+readable whether you write code for a living or have never seen a line of it.*
 
-- 💡 **(CS)** — computer-science fundamentals: hashing, parsing, indexes, complexity
-- 💡 **(SE)** — software-engineering practice: testing, config, dependency injection
-- 💡 **(ML)** — machine-learning: embeddings, transformers, vector math
-- 💡 **(RAG/Agents)** — retrieval-augmented generation and agentic-AI patterns
+---
 
-Newest entries at the bottom, grouped by session date.
+## Part 1 — What is this project?
+
+**repo-reviewer is a robot code-reviewer.** When a programmer proposes a change to a
+codebase (a "pull request" or PR — think: a suggested edit to a shared document),
+this system reads the change, understands the surrounding code, and leaves precise
+review comments — "line 10 has a security hole, here's the fix" — the way a careful
+senior engineer would. It is built almost entirely on free services, and it is
+deliberately **incapable** of approving or merging anything: it advises, humans decide.
+
+### The story of one review
+
+1. A programmer opens a PR on GitHub. GitHub rings our **doorbell** (a webhook) —
+   and signs the message cryptographically so nobody can fake the ring.
+2. A **queue** accepts the job and answers "got it" in milliseconds; if the
+   programmer pushes again before we start, the old job is thrown away — no point
+   reviewing stale code.
+3. A **planner** checks the change is worth reviewing (not empty, not absurdly huge).
+4. The changed lines are **enriched**: the system pulls the whole surrounding
+   function, finds every place that calls the changed code, and fetches similar code
+   from elsewhere in the project — the context a human reviewer holds in their head.
+5. Three **specialist reviewers** — one hunting bugs, one security holes, one style
+   inconsistencies — each read the enriched change. They are three differently-
+   instructed calls to a large language model (LLM).
+6. A **synthesizer** merges their reports: throws out low-confidence and duplicate
+   findings, ranks the rest, caps the total at 10 — signal over noise.
+7. Comments are posted back to GitHub at exact line positions. On a re-review, old
+   comments are replaced, not piled onto. (Today everything runs in **dry-run**:
+   comments print to a console instead of posting, until safety work completes.)
+
+Separately, the same machinery answers questions: *"how does authentication work in
+this repo?"* → an **agent** searches the code, reads files, follows references, and
+answers with checkable `file:line` citations.
+
+### The machine, phase by phase
+
+```
+              [Phase 4: doorbell + queue + assembly line]
+ GitHub PR ─▶ webhook ─▶ queue ─▶ ┌────────────────────────────────┐
+   (signed)                       │ planner ─▶ enrich ─▶ reviewers │
+                                  │  (×3, in parallel) ─▶ merge    │
+                                  └──────────────┬─────────────────┘
+                                                 ▼
+                              GitHub comments (dry-run for now)
+                                                 ▲
+        [Phase 3: the reviewers]                 │
+        [Phase 2: Q&A agent with tools] ─────────┤ both read from
+        [Phase 1: the searchable index] ─────────┘
+        [Phase 0: model access + safety rails under everything]
+```
+
+- **Phase 0** — foundation: access to several LLMs with automatic failover, and a
+  GitHub client that physically cannot approve/merge/push.
+- **Phase 1** — the library: the codebase cut into meaningful pieces and indexed two
+  ways, so both "what handles refunds?" and the exact name `process_refund` find it.
+- **Phase 2** — the librarian: an agent that uses that library with tools, in a loop.
+- **Phase 3** — the reviewers: diff parsing, context, three specialists, a merger.
+- **Phase 4** — the factory: everything wired into an automated, webhook-driven line.
+- **Phases 5–6 (upcoming)** — the exam and the shipping crate: precision/recall
+  benchmarks, attack resistance, then Docker deployment and going live.
+
+---
+
+## Part 2 — The ten ideas everything here is built on
+
+*Each idea: plain language first, then the precise version.*
+
+1. **LLM (large language model).** Autocomplete raised to a superpower: a program
+   trained on enormous amounts of text that, given words, predicts what comes next —
+   well enough to answer questions and follow instructions. We rent them over the
+   internet, paying (or free-tier-ing) per word-piece processed.
+2. **Tokens.** The syllables of the LLM world. Models read and write tokens (~4
+   characters each); every limit and price is counted in them. One hard-won lesson
+   (entry 6): "reasoning" models think in *hidden* tokens that bill against your
+   budget before any visible answer appears.
+3. **Embeddings.** A machine that turns any text into a point on a giant map, where
+   texts with similar *meaning* land near each other. "How are refunds handled?" and
+   `def process_refund(...)` become neighbors — so finding relevant code means
+   finding nearest points on the map. Ours runs locally, so searching costs nothing.
+4. **RAG (Retrieval-Augmented Generation).** LLMs answer from fuzzy memory unless
+   you hand them the actual pages — RAG is the open-book exam: *retrieve* the
+   relevant snippets first, then let the model read and answer from them. The
+   retriever's quality caps the whole system's quality.
+5. **Chunking — cutting along the seams.** Before indexing, documents get cut into
+   index-card-sized pieces. Cut code every 500 characters and you slice functions
+   mid-thought; we parse code into its natural structure (the AST — the tree of
+   functions and classes a compiler sees) and cut along those seams, so every
+   retrieved card is a complete thought (entry 8).
+6. **Two kinds of search, routed.** The meaning-map (embeddings) is great for "what
+   does X do?" questions; classic keyword search (BM25) is unbeatable for exact
+   names. Our benchmark proved each *hurts* the other's specialty — so a router
+   sends each question to the right one (entry 10). Measured: 80% → 94% accuracy.
+7. **Agents.** An LLM given tools and a loop: it decides "search for this", reads
+   the result, decides "now open that file", and repeats until it can answer — an
+   intern with a search engine, not an oracle. The model only ever *asks*; our code
+   does the doing, which is where safety lives (entries 11–13).
+8. **Hallucination — and receipts.** LLMs state falsehoods fluently, including fake
+   citations. Every claim here must carry a receipt (`file.py:10-20`) that our code
+   verifies against reality; failed receipts are flagged loudly, because a
+   fabricated citation marks a fabricated claim (entries 11, 12).
+9. **Guardrails by construction.** We don't *ask* the bot to behave — we make
+   misbehavior impossible: it acts only on allowlisted repos, runs in dry-run until
+   proven, and its GitHub client simply has no approve/merge/push functions. A
+   capability that doesn't exist cannot be tricked into use (entries 3, 13).
+10. **Measure, don't vibe.** Every design choice is a hypothesis until a benchmark
+    scores it. Our own benchmark flunked our "obviously better" search (entry 10)
+    and caught our over-aggressive duplicate filter (entry 12) — both times the
+    measurement, not intuition, decided. Negative results are the fee evals pay you.
+
+---
+
+## Part 3 — How to read the log
+
+Entries run oldest → newest, grouped by session. Each starts **In plain terms**
+(for everyone), then **What/Why/Logic** (for developers), then 💡 concept boxes
+tagged by level: **(CS)** computer-science fundamentals · **(SE)** software
+engineering · **(ML)** machine learning · **(RAG/Agents)** applied AI.
+
+| # | What happened | Take this away |
+|---|---|---|
+| 1 | Deleted duplicate folders — after proving them identical | Hashes compare files without revealing them |
+| 2 | Made labeled folders for every future part | The anatomy of a RAG system; what "agentic" means |
+| 3 | Python environment + safety tests | Guardrails belong in code, not in polite instructions |
+| 4 | Rescued API keys from a soon-to-be-public file | Secrets live in env files that never leave the machine |
+| 5 | Replaced four dead AI models | Hosted models retire in months; error types are diagnostic |
+| 6 | Gave the model room to answer | Reasoning models bill hidden "thinking" tokens |
+| 7 | Phase 0 proven working | Cosine similarity: meaning as geometry |
+| 8 | Built the code library (indexer) | AST chunking, hybrid search, incremental indexing |
+| 9 | Added progress bars | Long jobs owe you progress signals |
+| 10 | Built the exam; our search flunked; fixed by routing | Benchmarks exist to kill your favorite hypothesis |
+| 11 | Built the Q&A agent | The ReAct loop; citations as hallucination guards |
+| 12 | Built the PR reviewer (5/5 planted bugs) | Specialist prompts + validation gates + a signal cap |
+| 13 | Automated it end-to-end | Webhooks, HMAC signatures, queues, idempotent bots |
+
+---
 
 ---
 
 ## 2026-08-22 — Session 1 (Phase 0): Cleanup, environment repair, model migration
 
 ### 1. Deleted orphaned folders at `C:\Agentic-RAG\` root
+
+**In plain terms:** the project folder held two near-identical copies of everything. Before deleting the stale one, we *proved* it contained nothing unique — using file fingerprints (hashes) instead of eyeballing, so even the secret files could be compared without ever displaying them.
 
 **What:** Removed `repo-reviewer-phase0\`, and the top-level `.venv\`, `.pytest_cache\`, `.ruff_cache\`.
 
@@ -54,6 +186,8 @@ status, and file hashes first. One working directory removes "which copy am I ed
 
 ### 2. Created scaffold directories with `.gitkeep`
 
+**In plain terms:** we labeled the empty drawers of the machine we're about to build — one folder per future component. The concept boxes below explain the two words that define this whole project: what *RAG* is (an open-book exam for an AI) and what makes software *agentic* (an AI in a loop with tools, deciding its own next step).
+
 **What:** Added empty dirs `indexer/ qa/ review/ graph/ api/ eval/ docker/`, each containing an
 empty `.gitkeep` file.
 
@@ -89,6 +223,8 @@ in git only as a path prefix on some file — so the convention is a zero-byte `
 ---
 
 ### 3. Created `.venv` inside `repo-reviewer\`, installed `requirements.txt`
+
+**In plain terms:** the project got its own private toolbox (so its tools can't clash with other projects'), and we verified the three safety tests pass — the ones ensuring the bot can only touch approved repositories, only pretend-post until told otherwise, and *physically lacks* any approve/merge button.
 
 **What:** Fresh virtualenv (Python 3.13.7) at `repo-reviewer\.venv\`, then
 `pip install -r requirements.txt`. Verified: `pytest -q` → 3 passed, `ruff check .` → clean.
@@ -129,6 +265,8 @@ the only working dir. A venv belongs inside the project it serves.
 
 ### 4. Moved API keys from `.env.example` into `.env`; restored `.env.example`
 
+**In plain terms:** passwords had been pasted into the one settings file that gets *published* instead of its private twin that stays on this machine. One more push and they'd have been on the public internet, where scanner bots find leaked keys within minutes. Moved, verified never-published, crisis averted.
+
 **What:** Real credentials had been pasted into `.env.example` (the *tracked* template) instead of
 `.env` (the *gitignored* secrets file). Values were moved programmatically (never printed), then
 `git checkout -- .env.example` restored the template. Verified no commit in history ever carried
@@ -163,6 +301,8 @@ which is worse than nothing: it *looks* protected.
 ---
 
 ### 5. Replaced all four model IDs in `config.py`
+
+**In plain terms:** the four AI “brains” this project rents had all been discontinued since the config was written — like dialing four disconnected phone numbers. We asked each provider what it currently offers and auditioned replacements with real test calls before choosing.
 
 **What:**
 
@@ -216,6 +356,8 @@ ID — pin exact versions), Cerebras (no key set; only added noise to every fall
 
 ### 6. Raised `max_tokens` 10 → 300 in `scripts/smoke_llm.py`
 
+**In plain terms:** we asked the AI for a one-word answer but gave it a 10-word budget — and modern AIs “think” in hidden words that count against that budget before they say anything. It spent all 10 thinking and said nothing. Budget raised; it says “pong” now.
+
 **What:** The smoke test's completion call now passes `max_tokens=300`.
 
 **Why:** The first full run *connected* to both lanes but printed empty answers — `gpt-oss-120b`
@@ -243,6 +385,8 @@ hidden reasoning. A smoke test that "passes" while proving nothing is worse than
 ---
 
 ### 7. Phase 0 milestone: PASSED ✅
+
+**In plain terms:** foundation proven: both rented brains answer, the backup chain works, and the local meaning-map (embeddings) correctly places the question “how are refunds handled?” next to the refund code — the trick every later phase depends on.
 
 | Check | Result |
 |---|---|
@@ -278,6 +422,8 @@ hidden reasoning. A smoke test that "passes" while proving nothing is worse than
 ## 2026-08-22 — Session 2 (Phase 1): AST-aware indexing (core build)
 
 ### 8. Built the `indexer/` package
+
+**In plain terms:** we built the library. The codebase is cut into index cards — along its natural seams (whole functions, whole classes), never mid-thought — each card stamped with exactly where it lives. Two search systems (one for meaning, one for exact names) plus a phone book of every function definition. And it re-indexes only what changed: minutes of work becomes seconds.
 
 **What:** Six new modules + 20 new tests (23 total passing) + `docs/chunking.md`:
 
@@ -480,6 +626,8 @@ artifact.
 
 ### 9. Enabled embedding progress bars for large batches
 
+**In plain terms:** indexing used to be minutes of silence — impossible to tell “working hard” from “frozen.” Now it shows a progress bar.
+
 **What:** `indexer/embedder.py` now passes `show_progress_bar=len(texts) > 8` to
 `model.encode()` — indexing runs show a live per-batch tqdm bar; single-query embeds
 during search stay silent.
@@ -498,6 +646,8 @@ each batch; the size threshold keeps search queries from printing a bar per call
 ---
 
 ### 10. Retrieval eval harness — and the negative result that redesigned search
+
+**In plain terms:** we built an exam for our search engine — 35 questions with known correct answers — and our “obviously better” combined search *flunked it*, scoring worse than the simple version. The diagnosis (our own documentation was outshouting the code in keyword search) led to a smarter design: route each question to the search that suits it. Score: 80% → 94%. The exam earned its keep by killing a bad assumption before it shipped.
 
 **What:** Built `eval/` (naive baseline chunker, 35-question ground-truth set, 4-config
 harness), which immediately produced a *negative* result, whose diagnosis led to
@@ -568,6 +718,8 @@ pointing into `store.py` had drifted after editing it — re-verified before pub
 ## 2026-08-22 — Session 3 (Phase 2): Codebase Q&A agent
 
 ### 11. Built the `qa/` package — a from-scratch ReAct agent with validated citations
+
+**In plain terms:** the AI got hands: four tools (search, look up a name, open a file, list a folder) and a loop — look something up, read it, decide what to check next. Asked “what happens if Groq goes down?”, it investigated in 5 steps and answered correctly *while Groq was actually down*, riding the very backup chain it was describing. Every claim it makes carries a file-and-line receipt our code verifies; fake receipts get flagged, not hidden.
 
 **What:** Tool-calling support in `llm/router.py`; four read-only tools (`qa/tools.py`);
 the agent loop (`qa/agent.py`); CLI (`qa/__main__.py`); 7 new tests (32 passing);
@@ -641,6 +793,8 @@ encoding, not just content.
 
 ### 12. Built the `review/` package — diff in, ≤10 high-signal dry-run comments out
 
+**In plain terms:** the actual robot reviewer. It reads a proposed change, gathers the surrounding context a human reviewer would hold in their head, and sends in three specialists — bug-hunter, security auditor, style checker. A merger keeps only confident, non-duplicate findings, at most ten. On a test change with five planted problems it found *all five* at the exact right lines — after the test exposed that our duplicate filter was accidentally swallowing real findings.
+
 **What:** Five modules + 17 new tests (49 passing): `diff.py` (unified-diff → hunks with
 exact new-file line numbers), `context.py` (per-hunk enrichment from the Phase 1 index),
 `reviewers.py` (correctness/security/style agents, pydantic-validated), `synthesizer.py`
@@ -709,3 +863,77 @@ skipped for Gemini models.
 > Gemini 3 documents that low temperature can cause loops and degraded reasoning.
 > Provider defaults are the new safe choice; per-model overrides belong in the router,
 > not sprinkled through app code.
+
+---
+
+## 2026-08-23 — Session 5 (Phase 4): LangGraph orchestration & webhook automation
+
+### 13. Built `graph/` + `api/` — webhook-triggered, orchestrated, idempotent reviews
+
+**In plain terms:** the assembly line. GitHub rings our doorbell when a PR opens (cryptographically signed, so impostors get the door slammed — HTTP 403), a queue accepts the job instantly, and the whole review runs hands-free: plan → gather context → three reviewers → merge → post. Push new code and the bot *replaces* its old comments instead of spamming new ones. Still dry-run: it narrates what it would post.
+
+**What:** `graph/review_graph.py` (the LangGraph: planner → enrich → 3-reviewer
+fan-out → synthesize fan-in → post, with per-node tracing and an idempotency store),
+`api/webhook.py` (Flask receiver: HMAC verification, event filter, allowlist,
+in-process job queue with per-PR supersede), guarded client extensions (comment ids
+returned; summary now an editable issue comment; `supersede_review_comments`),
+`GITHUB_WEBHOOK_SECRET` in config, 8 new tests (57 passing), `docs/orchestration.md`.
+
+**Milestone:** signed webhook POST → HTTP 202 → queue → full graph → 5/5 findings on
+the seeded diff → dry-run posts → trace JSON. Mis-signed POST → 403. Second
+`synchronize` event for the same PR re-ran cleanly (supersede path exercised; its
+live-mode behavior pinned by a fake-client test since dry-run posts nothing to
+supersede). Node timings from the trace: enrich ~7s warm, reviewers 18–25s each.
+
+**Three failures on the way, all instructive:**
+
+1. **A silent no-op patch.** The client extension was "applied" via Python
+   `str.replace` that didn't match — and the script printed success anyway, because it
+   printed unconditionally. Guard tests stayed green (they don't use the new kwarg);
+   the graph then crashed at the post node. Lesson: after any programmatic edit,
+   verify the *artifact* (grep the new symbol), never the script's own success print.
+   The fix used the Edit tool, which fails loudly on a non-match.
+2. **"Hangs" that were physics.** Two 10-minute timeouts were CPU embedding time —
+   ~8 changed files re-embedding inside the run window. A staged debug script + log
+   monitor turned the black box into `STAGE 2: run_review starting` → `indexed: 8
+   changed` → per-node timings. Lesson: instrument before assuming deadlock.
+3. **Script-dir vs cwd.** Moving the milestone script to the scratchpad broke
+   `import config` — Python puts the *script's* directory on `sys.path`, not the
+   working directory. `PYTHONPATH` fixed it.
+
+> 💡 **(RAG/Agents) Graphs vs hand-rolled loops.** Phase 2's ReAct loop was ~40 lines
+> because one agent + tools needs no more. Phase 4 is where a framework earns its
+> keep: fan-out/fan-in, conditional routing (planner → skip), and shared state with
+> merge semantics. LangGraph's model: nodes return partial state updates; fields
+> declared `Annotated[list, operator.add]` **reduce** concurrent writes — three
+> reviewer branches each return findings and the framework merges them. Orchestration
+> logic lives in the graph shape, not in if/else soup.
+
+> 💡 **(CS/SE) Webhooks + HMAC.** A webhook is an inbound callback: GitHub POSTs to
+> your public URL on events. Anyone can POST to a public URL, so GitHub signs the
+> body with a shared secret (HMAC-SHA256, `X-Hub-Signature-256`) and the receiver
+> recomputes and compares — with `hmac.compare_digest`, which takes constant time to
+> defeat timing attacks (a naive `==` leaks how many leading bytes matched). Verify
+> the signature BEFORE trusting anything in the payload; ours also re-checks the repo
+> allowlist so a forged-but-somehow-signed event for a foreign repo still dies.
+
+> 💡 **(SE) Queues and superseding work.** The webhook must answer in seconds
+> (GitHub times out) but a review takes a minute — so: acknowledge 202, enqueue, let
+> a worker run it. Ours also collapses redundant work: a new push to a PR whose job
+> is still queued replaces that job — reviewing an outdated commit is pure waste.
+> The in-process queue is a deliberate tradeoff (zero infra, dies with the process);
+> the Redis/rq upgrade is documented for Phase 6.
+
+> 💡 **(RAG/Agents) Idempotency for bot actions.** Every push re-reviews; without
+> care the bot posts duplicate walls of comments — the fastest way to get muted.
+> Design: remember what you posted (`repo#pr → comment ids`), delete-and-replace
+> inline comments, and *edit* one summary comment in place. That last requirement
+> drove an API change: GitHub reviews aren't editable-in-place the way issue
+> comments are, so the summary became an issue comment. Product constraints
+> (don't spam) reach down into API-shape decisions.
+
+> 💡 **(SE) Observability: traces.** Each node records its duration into the state;
+> each run writes a JSON trace (`data/traces/`). That's how "it's slow" became
+> "enrich is 29s cold / 7s warm, reviewers ~20s each" — decisions need numbers, not
+> feelings. Langfuse (proper LLM tracing UI) arrives with Docker in Phase 6; the
+> local trace already captures the shape it will consume.
