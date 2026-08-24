@@ -81,3 +81,47 @@ def test_render_tags_lines_with_new_numbers():
     text = parse_diff(MULTI_HUNK)[0].hunks[1].render()
     assert "   22 +     y = modern()" in text
     assert "    - -     y = legacy()" in text
+
+
+# --- regression: PyGithub patches lack file headers (found by the first live PR run)
+
+class FakeGHFile:
+    """Mimics PyGithub's File: .patch holds ONLY hunks, no ---/+++ headers."""
+
+    def __init__(self, filename, patch, status="modified", previous_filename=None):
+        self.filename = filename
+        self.patch = patch
+        self.status = status
+        self.previous_filename = previous_filename
+
+
+def test_build_diff_adds_file_headers_so_the_parser_accepts_it():
+    from gh.client import build_diff
+    # 2 lines each side: 1 changed + 1 context. The counts in @@ must match exactly.
+    hunk = "@@ -18,2 +18,2 @@ def f():\n-    return a, b\n+    return {'a': a}\n     pass"
+    diff = build_diff([FakeGHFile("app/search.py", hunk)])
+    assert diff.startswith("--- a/app/search.py\n+++ b/app/search.py\n@@")
+    files = parse_diff(diff)                      # would raise UnidiffParseError before the fix
+    assert files[0].path == "app/search.py"
+
+
+def test_build_diff_marks_added_and_removed_with_dev_null():
+    from gh.client import build_diff
+    added = FakeGHFile("new.py", "@@ -0,0 +1,1 @@\n+x = 1", status="added")
+    removed = FakeGHFile("old.py", "@@ -1,1 +0,0 @@\n-x = 1", status="removed")
+    files = {f.path: f for f in parse_diff(build_diff([added, removed]))}
+    assert files["new.py"].is_new
+    assert files["old.py"].is_deleted
+
+
+def test_build_diff_uses_previous_filename_for_renames():
+    from gh.client import build_diff
+    renamed = FakeGHFile("new_name.py", "@@ -1,1 +1,1 @@\n-a\n+b",
+                         status="renamed", previous_filename="old_name.py")
+    diff = build_diff([renamed])
+    assert "--- a/old_name.py" in diff and "+++ b/new_name.py" in diff
+
+
+def test_build_diff_skips_binary_files():
+    from gh.client import build_diff
+    assert build_diff([FakeGHFile("logo.png", None)]) == ""

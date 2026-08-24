@@ -138,6 +138,7 @@ engineering · **(ML)** machine learning · **(RAG/Agents)** applied AI.
 | 12 | Built the PR reviewer (5/5 planted bugs) | Specialist prompts + validation gates + a signal cap |
 | 13 | Automated it end-to-end | Webhooks, HMAC signatures, queues, idempotent bots |
 | 14 | Graded the reviewer; hardened the failovers | Precision vs recall; injection defense; an eval that measured the wrong thing |
+| 15 | First live PR on real code — caught a cross-file bug | Integration gaps: 73 tests missed what one real API call found |
 
 ---
 
@@ -1044,3 +1045,93 @@ rate-limited), `nemotron-ultra-550b` (17.8s — too slow to be a fallback).
 > domains* — different providers, different quotas, different companies — and each
 > leg must be verified to support the features the caller needs (JSON mode here), not
 > merely to respond.
+
+---
+
+## 2026-08-25 — Session 7: First live PR review on real third-party code
+
+### 15. Reviewed a real GitHub PR — and found the integration bug four phases of tests had hidden
+
+**In plain terms:** until now the robot reviewer had only ever read *make-believe*
+code changes we wrote ourselves. Today it read a **real pull request on a real
+GitHub repository**, containing a real open-source application neither of us wrote.
+The change looked innocent — two lines, a plausible commit message. But it quietly
+broke a *different file that was not part of the change at all*. The reviewer caught
+it, explained exactly which line would crash and why — and spotted a second, nastier
+version of the bug that the person who planted it (me) had not noticed.
+
+**Setup.** The target repo was populated with Microblog (Miguel Grinberg, MIT) —
+40 indexable files, 184 chunks, 111 symbols. A branch changed `query_index()` in
+`app/search.py` to return a dict instead of its documented `(ids, total)` tuple.
+The caller, `app/models.py:22`, does `ids, total = query_index(...)` — **and that
+file was not in the diff.**
+
+**Result — the thesis, demonstrated:**
+
+> **[high · broken-contract · correctness]** *Changing `query_index` to return a
+> dictionary breaks callers like `Model.search` in `app/models.py`, which expects a
+> tuple `(ids, total)`. Unpacking with a 3-key dictionary will raise `ValueError:
+> too many values to unpack (expected 2)`. If elasticsearch is disabled (line 21),
+> unpacking the 2-key dictionary will assign the string keys `'ids'` and `'total'`
+> instead of their values.*
+
+The second sentence found a bug **I did not plant**: the early-return path returns a
+*2-key* dict, which unpacks without raising — silently binding the strings `'ids'`
+and `'total'` to the variables instead of the data. No exception, corrupted values
+downstream. Strictly worse than the failure I designed, and I missed it.
+
+| | |
+|---|---|
+| Raw findings / kept | 2 / 2, both `high` |
+| False positives | 0 (security correctly silent — no security issue existed) |
+| LLM calls | 3, **1 fallback** (Gemini rate-limited mid-run; `gemini-3.5-flash` finished the job) |
+| Cost | $0.00 |
+| Posted | nothing — `DRY_RUN` held |
+
+**The bug this run exposed.** The first attempt crashed instantly:
+`UnidiffParseError: Unexpected hunk found`. `gh/client.py:get_pr_diff` had been
+broken **since Phase 0**: PyGithub's `f.patch` returns only the hunks, without the
+`--- a/file` / `+++ b/file` headers a diff parser requires. Every test since Phase 3
+fed the pipeline synthetic, well-formed diffs, so the one function that talks to the
+real API was never exercised. Fixed with a pure `build_diff(files)` helper
+(handling `/dev/null` for adds/deletes and `previous_filename` for renames) plus 4
+regression tests using a fake PyGithub File — now covered without a network call.
+73 tests passing.
+
+*(Self-correction worth recording: my first regression fixture failed, and it was my
+own hunk arithmetic wrong again — `@@ -18,3 +18,3 @@` declaring three lines where I
+wrote two — the identical mistake from entry 12. The strict parser caught it both
+times. `build_diff` was correct from the start.)*
+
+> 💡 **(SE) The integration gap — why 73 passing tests proved nothing here.** Unit
+> tests verify code against *your assumptions*. They cannot verify the assumptions
+> themselves. Ours asserted that a stitched-together diff looks like a real one — a
+> belief no test could falsify, because every test *built its input from that same
+> belief*. Only contact with the real API could expose it. The lesson is not "write
+> more unit tests"; it is that **every external boundary needs at least one honest
+> end-to-end test**, and that a green suite is evidence about your model of the
+> world, not about the world.
+
+> 💡 **(RAG/Agents) Why retrieval beats reading the diff.** A conventional reviewer —
+> human or AI — sees only the changed lines. The bug here was *invisible* there:
+> `app/search.py` is internally consistent after the change. Catching it required
+> knowing that a symbol in the diff is referenced somewhere else, and pulling that
+> somewhere-else into the prompt. Three Phase-1 pieces made it work: the **symbol
+> table** (exact cross-file references — similarity search could never guarantee
+> finding *the* call site), **context enrichment** (call sites injected into the
+> reviewer's view), and the **quality lane** (enough context budget to reason over
+> both). This is the entire argument for RAG-over-code in one finding.
+
+> 💡 **(RAG/Agents) The model exceeded its brief.** The reviewer reported a failure
+> mode I had not planted and did not know about. That is the genuine value of an LLM
+> reviewer over a linter: rule-based tools find what their rules encode; a model
+> reasons about *what this code will actually do*. It is also the reason for the
+> validation gates — the same generative freedom that finds unplanned bugs invents
+> unplanned facts, so every finding must anchor to a real diff line before it is
+> allowed to reach a human.
+
+**One imperfection, recorded honestly:** the *style* reviewer also reported the
+correctness bug (at a different line), straying out of its lane. Not wrong, but it
+is duplicated signal that same-line dedupe cannot merge because the two findings
+anchor to different lines. Candidate fixes for later: cross-reviewer semantic
+dedupe, or tightening the style prompt to refuse non-style findings outright.

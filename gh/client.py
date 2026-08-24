@@ -17,6 +17,24 @@ from config import settings
 log = logging.getLogger(__name__)
 
 
+def build_diff(files) -> str:
+    """PyGithub File objects -> a parseable unified diff.
+
+    Pure function of the file list so it is testable without any network.
+    """
+    parts = []
+    for f in files:
+        patch = getattr(f, "patch", None)
+        if not patch:                      # binary files have no patch
+            continue
+        status = getattr(f, "status", "modified")
+        old_name = getattr(f, "previous_filename", None) or f.filename
+        old = "/dev/null" if status == "added" else f"a/{old_name}"
+        new = "/dev/null" if status == "removed" else f"b/{f.filename}"
+        parts.append(f"--- {old}\n+++ {new}\n{patch.rstrip()}\n")
+    return "".join(parts)
+
+
 class GitHubClient:
     def __init__(self) -> None:
         self._gh = Github(auth=Auth.Token(settings.github_token))
@@ -34,9 +52,14 @@ class GitHubClient:
         return self._gh.get_repo(full_name).get_pull(number)
 
     def get_pr_diff(self, full_name: str, number: int) -> str:
-        pr = self.get_pr(full_name, number)
-        # PyGithub doesn't expose the raw diff directly; stitch per-file patches
-        return "\n".join(f.patch for f in pr.get_files() if f.patch)
+        """Reassemble a unified diff from PyGithub's per-file patches.
+
+        f.patch contains ONLY the hunks - no `--- a/x` / `+++ b/x` file headers -
+        so the headers must be rebuilt or any diff parser rejects the result with
+        "Unexpected hunk found". Renames use previous_filename for the old side;
+        added/removed files use /dev/null, which is how the parser detects them.
+        """
+        return build_diff(self.get_pr(full_name, number).get_files())
 
     # ---------- writes (guarded) ----------
     def _guard(self, full_name: str, action: str) -> bool:
