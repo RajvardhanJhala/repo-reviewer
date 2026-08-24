@@ -48,17 +48,43 @@ class GitHubClient:
             return False
         return True
 
-    def post_review_comment(self, full_name: str, number: int, path: str, line: int, body: str) -> None:
+    def post_review_comment(self, full_name: str, number: int, path: str, line: int,
+                            body: str) -> int | None:
+        """Returns the comment id (None in dry-run) so re-reviews can supersede it."""
         if not self._guard(full_name, f"post inline comment {path}:{line}"):
             print(f"[DRY_RUN] {full_name}#{number} {path}:{line}\n  {body}\n")
-            return
+            return None
         pr = self.get_pr(full_name, number)
         commit = pr.get_commits().reversed[0]
-        pr.create_review_comment(body=body, commit=commit, path=path, line=line)
+        return pr.create_review_comment(body=body, commit=commit, path=path, line=line).id
 
-    def post_review_summary(self, full_name: str, number: int, body: str) -> None:
-        if not self._guard(full_name, "post summary review"):
+    def post_review_summary(self, full_name: str, number: int, body: str,
+                            prior_comment_id: int | None = None) -> int | None:
+        """Summary is an ISSUE comment (not a review): issue comments are editable,
+        which lets a re-review update one summary in place instead of piling a new
+        review onto the PR per push. Advisory text only — the no-approve/no-merge
+        invariant is unchanged."""
+        if not self._guard(full_name, "post summary comment"):
             print(f"[DRY_RUN] {full_name}#{number} SUMMARY:\n  {body}\n")
+            return None
+        repo = self._gh.get_repo(full_name)
+        if prior_comment_id is not None:
+            try:
+                repo.get_issue(number).get_comment(prior_comment_id).edit(body)
+                return prior_comment_id
+            except Exception:
+                log.warning("prior summary %s gone; posting fresh", prior_comment_id)
+        return self.get_pr(full_name, number).create_issue_comment(body).id
+
+    def supersede_review_comments(self, full_name: str, number: int,
+                                  comment_ids: list[int]) -> None:
+        """Remove this bot's own previous inline comments before a re-review."""
+        if not self._guard(full_name, f"supersede {len(comment_ids)} old comments"):
+            print(f"[DRY_RUN] {full_name}#{number} would supersede comments {comment_ids}")
             return
-        # event="COMMENT" only. Never APPROVE / REQUEST_CHANGES.
-        self.get_pr(full_name, number).create_review(body=body, event="COMMENT")
+        pr = self.get_pr(full_name, number)
+        for cid in comment_ids:
+            try:
+                pr.get_review_comment(cid).delete()
+            except Exception:
+                log.warning("old comment %s already gone", cid)

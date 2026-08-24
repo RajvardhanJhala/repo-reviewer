@@ -47,6 +47,22 @@ class LLMResponse:
     raw: Any = field(repr=False, default=None)
 
 
+# USD per 1M tokens (prompt, completion). Every model we use is free-tier ($0),
+# but the accounting is real so swapping in a paid model reports true cost.
+PRICE_PER_1M: dict[str, tuple[float, float]] = {
+    "gemini/gemini-3.6-flash": (0.0, 0.0),
+    "groq/openai/gpt-oss-120b": (0.0, 0.0),
+    "groq/openai/gpt-oss-20b": (0.0, 0.0),
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free": (0.0, 0.0),
+}
+DEFAULT_PRICE = (0.0, 0.0)
+
+
+def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    p_in, p_out = PRICE_PER_1M.get(model, DEFAULT_PRICE)
+    return (prompt_tokens * p_in + completion_tokens * p_out) / 1_000_000
+
+
 @dataclass
 class UsageStats:
     calls: int = 0
@@ -55,12 +71,14 @@ class UsageStats:
     completion_tokens: int = 0
     latencies: list[float] = field(default_factory=list)
     by_model: dict[str, int] = field(default_factory=dict)
+    cost_usd: float = 0.0
 
     def record(self, r: LLMResponse) -> None:
         self.calls += 1
         self.fallbacks += int(r.fell_back)
         self.prompt_tokens += r.prompt_tokens
         self.completion_tokens += r.completion_tokens
+        self.cost_usd += estimate_cost(r.model_used, r.prompt_tokens, r.completion_tokens)
         self.latencies.append(r.latency_s)
         self.by_model[r.model_used] = self.by_model.get(r.model_used, 0) + 1
 
@@ -74,6 +92,7 @@ class UsageStats:
             "completion_tokens": self.completion_tokens,
             "p50_latency_s": round(pct(0.50), 3),
             "p95_latency_s": round(pct(0.95), 3),
+            "cost_usd": round(self.cost_usd, 6),
             "by_model": self.by_model,
         }
 

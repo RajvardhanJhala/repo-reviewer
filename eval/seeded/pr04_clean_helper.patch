@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/scripts/slugify.py
+@@ -0,0 +1,7 @@
++import re
++
++
++def slugify(text):
++    """Lowercase a string and replace non-word runs with single hyphens."""
++    cleaned = re.sub(r"[^\w]+", "-", text.lower())
++    return cleaned.strip("-")

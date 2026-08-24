@@ -1,0 +1,9 @@
+--- /dev/null
++++ b/scripts/greet.py
+@@ -0,0 +1,6 @@
++def greet(name):
++    """Return a friendly greeting for the given name."""
++    if not name:
++        return "Hello, friend!"
++    return f"Hello, {name}!"
++

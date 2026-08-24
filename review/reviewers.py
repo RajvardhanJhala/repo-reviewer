@@ -95,7 +95,13 @@ def run_reviewer(name: str, contexts: list[HunkContext],
     body = "\n\n".join(ctx.render() for ctx in contexts)
     messages = [{"role": "system", "content": REVIEWER_PROMPTS[name]},
                 {"role": "user", "content": f"Review this pull request diff:\n\n{body}"}]
-    resp = chat_fn(messages, lane="quality", max_tokens=4096, json_mode=True)
+    try:
+        resp = chat_fn(messages, lane="quality", max_tokens=4096, json_mode=True)
+    except Exception as e:
+        # One reviewer's providers being down must not kill the whole review.
+        # A missing reviewer means fewer findings, never a crashed pipeline.
+        log.warning("reviewer=%s LLM call failed entirely (%s); skipping", name, type(e).__name__)
+        return []
 
     data = _extract_json(resp.text)
     if data is None:

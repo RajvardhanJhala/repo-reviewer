@@ -1,0 +1,10 @@
+--- /dev/null
++++ b/scripts/stats.py
+@@ -0,0 +1,7 @@
++def mean_of(values):
++    total = 0
++    for i in range(1, len(values)):
++        total += values[i]
++    return total / len(values)
++
++
