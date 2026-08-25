@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>Runs</h2>
+<div class="sub">Reviews and questions, newest first.</div>
+{% for run in runs %}
+  <a class="row" href="{{ url_for('dashboard.run_detail', run_id=run.id) }}">
+    <div class="panel flex">
+      <div>
+        <div>{{ run.title }}</div>
+        <div class="muted">{{ run.kind }} · {{ run.created_at }}{% if run.duration_s %} · {{ run.duration_s }}s{% endif %}</div>
+      </div>
+      <span class="badge {{ run.status }}">{{ run.status }}</span>
+    </div>
+  </a>
+{% else %}
+  <div class="empty">
+    No runs yet.<br><br>
+    <a href="{{ url_for('dashboard.new_review') }}">Review a diff</a> or
+    <a href="{{ url_for('dashboard.new_ask') }}">ask a question</a>.
+  </div>
+{% endfor %}
+{% endblock %}

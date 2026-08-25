@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="empty">Run <code>{{ run_id }}</code> not found.<br><br>
+<a href="{{ url_for('dashboard.index') }}">Back to runs</a></div>
+{% endblock %}

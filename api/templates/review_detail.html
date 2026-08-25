@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>{{ run.title }}</h2>
+<div class="sub">Review · {{ run.created_at }}{% if run.duration_s %} · {{ run.duration_s }}s{% endif %}</div>
+{% include "_poll.html" %}
+
+{% if run.status == "done" %}
+  {% set r = run.result %}
+  <div class="panel">
+    <strong>{{ r.verdict }}</strong>
+    <div class="muted" style="margin-top:6px">
+      {{ r.counts.kept }} of {{ r.counts.raw }} findings kept ·
+      {{ r.counts.low_confidence }} low-confidence, {{ r.counts.duplicates }} duplicate,
+      {{ r.counts.over_cap }} over cap suppressed
+    </div>
+    <div class="muted">Files: {% for f in r.files %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>
+  </div>
+
+  {% for f in r.findings %}
+    <div class="panel">
+      <div class="flex">
+        <span class="loc"><code>{{ f.path }}:{{ f.line }}</code></span>
+        <span><span class="sev {{ f.severity }}">{{ f.severity }}</span>
+          <span class="muted">· {{ f.category }} · {{ f.reviewer }} · {{ '%.2f'|format(f.confidence) }}</span></span>
+      </div>
+      <div style="margin-top:9px">{{ f.comment }}</div>
+      {% if f.suggested_fix %}<pre style="margin-top:10px">{{ f.suggested_fix }}</pre>{% endif %}
+    </div>
+  {% else %}
+    <div class="panel muted">No findings above the confidence floor.</div>
+  {% endfor %}
+
+  <div class="muted">Advisory only — this bot never approves, blocks, or merges.</div>
+{% endif %}
+{% endblock %}

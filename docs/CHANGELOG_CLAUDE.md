@@ -139,6 +139,7 @@ engineering · **(ML)** machine learning · **(RAG/Agents)** applied AI.
 | 13 | Automated it end-to-end | Webhooks, HMAC signatures, queues, idempotent bots |
 | 14 | Graded the reviewer; hardened the failovers | Precision vs recall; injection defense; an eval that measured the wrong thing |
 | 15 | First live PR on real code — caught a cross-file bug | Integration gaps: 73 tests missed what one real API call found |
+| 16 | Gave it a web dashboard | Async jobs behind a web UI; sharing one worker without jobs eating each other |
 
 ---
 
@@ -1135,3 +1136,82 @@ correctness bug (at a different line), straying out of its lane. Not wrong, but 
 is duplicated signal that same-line dedupe cannot merge because the two findings
 anchor to different lines. Candidate fixes for later: cross-reviewer semantic
 dedupe, or tightening the style prompt to refuse non-style findings outright.
+
+---
+
+## 2026-08-25 — Session 8: Local dashboard
+
+### 16. A web UI — browse past reviews, start new ones, ask the codebase questions
+
+**In plain terms:** everything so far lived in a terminal. Now there is a small web
+page: a list of past reviews and questions, a form to paste a code change and get it
+reviewed, and a box to ask questions about the code. You open a browser instead of
+typing commands, and because a review takes minutes, the page waits and refreshes
+itself when the answer is ready.
+
+**What:** `api/store.py` (a run store), `api/dashboard.py` (Flask blueprint + the
+job runners), eight Jinja templates, and 12 tests. `python -m api --repo <path>`
+now serves the dashboard *and* the webhook receiver on one port. 85 tests passing.
+
+| Route | Purpose |
+|---|---|
+| `/` | all runs, newest first, with status badges |
+| `/run/<id>` | findings with severity/confidence, or an answer with verified citations and the tool trace |
+| `/new/review` | paste a unified diff, or give a PR number on an allowlisted repo |
+| `/new/ask` | ask the Q&A agent a question |
+| `/api/run/<id>` | JSON the detail page polls until the run finishes |
+
+**Design decisions:**
+
+- **Server-rendered Jinja, no JS framework.** The only script on the page is a
+  ten-line poll loop. No build step, no `node_modules`, nothing to keep updated —
+  appropriate for a single-user local tool, and it keeps the project's dependency
+  story honest.
+- **Reuse the Phase 4 `JobQueue`.** Reviews take minutes; an HTTP request must not
+  block that long. Submitting returns immediately and redirects to a detail page
+  that polls. One worker thread serves both webhook and dashboard jobs via a small
+  `dispatch` function.
+- **Flat-file run store, not a database.** One JSON file per run under `data/runs/`,
+  written to a temp name then atomically renamed so a reader never sees a partial
+  file. Postgres is the documented Tier-2 upgrade, not a pretended one.
+
+**The bug I introduced and caught in the same hour.** `JobQueue` keys jobs by
+`repo#pr` so a new push supersedes a stale queued review — correct for webhooks.
+But dashboard jobs have no PR, so I passed `gh_repo="local", pr_number=0`, meaning
+**every dashboard submission would collide on the key `local#0` and silently
+cancel the previous one.** Two people (or one impatient person) clicking twice would
+lose a run. Fixed by keying dashboard jobs on their own run id, with two tests
+pinning both behaviors: dashboard jobs never merge, webhook jobs still do.
+
+*(Also self-corrected: a test asserted that garbage input produces an error run, but
+`@@ this is not a diff @@` is not hunk-shaped, so the parser ignores it and the run
+legitimately succeeds with zero findings. Swapped in a bare hunk with no file
+headers — the exact malformed shape from entry 15 — which really does raise.)*
+
+> 💡 **(SE) Long jobs behind a short request.** HTTP requests should finish in
+> milliseconds; this work takes minutes. The standard resolution is to decouple
+> them: accept the request, persist an intent, hand it to a worker, return an id
+> immediately, and let the client poll (or subscribe) for completion. Every "your
+> report is being generated" screen you have ever seen is this pattern. The corollary
+> is that the job store — not the request — becomes the source of truth, which is why
+> the run store came before the routes.
+
+> 💡 **(CS) Idempotency keys cut both ways.** Collapsing duplicate work is a feature
+> when the duplicates are *redundant* (three pushes to one PR: only the newest
+> matters) and a bug when they are *distinct* (two deliberate user requests). Same
+> mechanism, opposite correctness, decided entirely by what the key means. When you
+> add a new producer to an existing queue, re-ask what its key should be — inheriting
+> the old one silently destroyed work here.
+
+> 💡 **(SE) Atomic writes.** The store writes to `.<id>.tmp` and then `replace()`s
+> the real path, because a rename is atomic on POSIX and Windows while a write is
+> not. Without it, a dashboard page listing runs while a worker writes one could read
+> half a JSON file. The `list()` method also skips unparseable files: defense in
+> depth, since one corrupt record must never blank the whole page.
+
+**Scope note.** This is Tier 1 of the three tiers sketched earlier: a local,
+single-user dashboard over the existing engine. It deliberately does **not** add
+auth, multi-tenancy, or a persistent broker. What would break first under real
+multi-user load, in order: local CPU embeddings (~30s/repo, does not parallelize),
+free-tier LLM quotas (exhausted three times in one day by *one* user), and the
+in-process queue (dies with the process).

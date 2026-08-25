@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>Ask the codebase</h2>
+<div class="sub">The agent searches, reads files, follows references, and cites file:line.</div>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post" class="panel">
+  <label for="question">Question</label>
+  <input type="text" id="question" name="question" placeholder="How does model fallback work?">
+  <div style="margin-top:18px"><button type="submit">Ask</button></div>
+</form>
+{% endblock %}

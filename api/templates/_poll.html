@@ -1,0 +1,25 @@
+{% if run.status in ("queued", "running") %}
+<div class="panel" id="pending">
+  <div class="flex">
+    <div><strong>{{ run.status|capitalize }}…</strong>
+      <div class="muted">This page refreshes itself. Reviews take a few minutes on first index.</div>
+    </div>
+    <span class="badge {{ run.status }}">{{ run.status }}</span>
+  </div>
+</div>
+<script>
+  (function poll() {
+    setTimeout(async () => {
+      try {
+        const r = await fetch("{{ url_for('dashboard.run_json', run_id=run.id) }}");
+        const j = await r.json();
+        if (j.status === "done" || j.status === "error") { location.reload(); return; }
+      } catch (e) { /* transient: keep polling */ }
+      poll();
+    }, 3000);
+  })();
+</script>
+{% endif %}
+{% if run.status == "error" %}
+  <div class="panel"><div class="err">Run failed</div><pre>{{ run.error }}</pre></div>
+{% endif %}

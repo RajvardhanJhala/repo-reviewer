@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>New review</h2>
+<div class="sub">Paste a unified diff, or give a PR number on an allowlisted repo.</div>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post" class="panel">
+  <label for="diff">Unified diff</label>
+  <textarea id="diff" name="diff" placeholder="--- a/app/search.py&#10;+++ b/app/search.py&#10;@@ -19,3 +19,3 @@"></textarea>
+  <label>…or review a pull request</label>
+  <div style="display:flex; gap:10px">
+    <input type="text" name="gh_repo" placeholder="owner/repo">
+    <input type="text" name="pr_number" placeholder="PR #" style="max-width:110px">
+  </div>
+  <div style="margin-top:18px"><button type="submit">Start review</button></div>
+  <div class="muted" style="margin-top:10px">
+    Runs the full pipeline; first index of a repo takes a few minutes.
+    Posting stays disabled while DRY_RUN is on.
+  </div>
+</form>
+{% endblock %}

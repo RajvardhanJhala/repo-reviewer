@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>{{ run.title }}</h2>
+<div class="sub">Question · {{ run.created_at }}{% if run.duration_s %} · {{ run.duration_s }}s{% endif %}</div>
+{% include "_poll.html" %}
+
+{% if run.status == "done" %}
+  {% set r = run.result %}
+  <div class="panel" style="white-space:pre-wrap">{{ r.answer }}</div>
+
+  <div class="panel">
+    <strong>Citations</strong>
+    <div class="muted" style="margin-bottom:8px">Verified against the working tree.</div>
+    {% for c in r.citations %}
+      <div><code class="loc">{{ c.path }}:{{ c.start }}-{{ c.end }}</code>
+        {% if c.valid %}<span style="color:var(--ok)">✓</span>
+        {% else %}<span class="sev high">invalid — {{ c.reason }}</span>{% endif %}</div>
+    {% else %}
+      <div class="muted">No citations returned.</div>
+    {% endfor %}
+  </div>
+
+  <div class="panel">
+    <strong>Tool trace</strong>
+    <div class="muted" style="margin-bottom:8px">{{ r.steps }} steps{% if r.ran_out_of_steps %} · hit step limit{% endif %}</div>
+    {% for t in r.tool_trace %}
+      <div class="muted"><code>{{ t.step }}. {{ t.tool }}({{ t.arguments }})</code> → {{ t.result_chars }} chars</div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

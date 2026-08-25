@@ -24,6 +24,7 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 from flask import Flask, jsonify, request
 
@@ -54,7 +55,11 @@ class JobQueue:
         self._worker.start()
 
     def submit(self, job: dict) -> str:
-        key = f"{job['gh_repo']}#{job['pr_number']}"
+        # Webhook jobs key by PR so a new push replaces a stale queued review.
+        # Dashboard jobs are explicit user requests: each one keys by its own run
+        # id so two submissions never collapse into one.
+        key = (f"run:{job['dashboard_run']}" if job.get("dashboard_run")
+               else f"{job['gh_repo']}#{job['pr_number']}")
         with self._lock:
             superseded = key in self._latest
             self._latest[key] = job          # newest payload wins
@@ -78,8 +83,6 @@ class JobQueue:
 
 def default_runner(job: dict) -> None:
     """Clone the PR head, index it, run the graph, post (dry-run-guarded)."""
-    from pathlib import Path
-
     from gh.client import GitHubClient
     from graph.review_graph import Deps, run_review
 
@@ -97,12 +100,41 @@ def default_runner(job: dict) -> None:
              result.get("skip_reason", ""))
 
 
-def create_app(runner: Callable[[dict], None] | None = None) -> Flask:
+def create_app(runner: Callable[[dict], None] | None = None,
+               repo_path: Path | None = None, data_dir: Path | None = None,
+               chat_fn: Callable | None = None, embed_fn: Callable | None = None) -> Flask:
+    """Webhook receiver + local dashboard in one app.
+
+    repo_path/data_dir say which checkout the dashboard reviews and answers
+    questions about; webhook jobs still clone the PR head per event.
+    """
+    from api.dashboard import bp as dashboard_bp
+    from api.dashboard import make_dashboard_runner
+    from api.store import RunStore
+
     app = Flask(__name__)
-    jobs = JobQueue(runner or default_runner)
+    repo_path = Path(repo_path or ".").resolve()
+    data_dir = Path(data_dir or Path("data") / repo_path.name)
+    app.config["REPO_PATH"] = str(repo_path)
+    app.config["DATA_DIR"] = str(data_dir)
+
+    store = RunStore(Path("data") / "runs")
+    dashboard_runner = make_dashboard_runner(repo_path, data_dir, store, chat_fn, embed_fn)
+    webhook_runner = runner or default_runner
+
+    def dispatch(job: dict) -> None:
+        """One worker serves both sources; dashboard jobs carry a run id."""
+        if job.get("dashboard_run"):
+            dashboard_runner(job)
+        else:
+            webhook_runner(job)
+
+    jobs = JobQueue(dispatch)
     limiter = RateLimiter()
     app.extensions["jobs"] = jobs
     app.extensions["limiter"] = limiter
+    app.extensions["runs"] = store
+    app.register_blueprint(dashboard_bp)
 
     @app.get("/healthz")
     def healthz():

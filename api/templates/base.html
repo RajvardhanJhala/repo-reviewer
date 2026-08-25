@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}repo-reviewer{% endblock %}</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a21; --border: #262b36; --text: #d7dce5;
+    --muted: #8b93a7; --accent: #6ea8fe; --high: #ff6b6b; --medium: #ffa94d;
+    --low: #8b93a7; --ok: #51cf66;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#fff; --border:#dfe3ea; --text:#1a1d24;
+            --muted:#6b7280; --accent:#1c6ef2; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55
+         ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { border-bottom:1px solid var(--border); padding:14px 22px;
+           display:flex; gap:20px; align-items:baseline; }
+  header h1 { font-size:16px; margin:0; letter-spacing:-.01em; }
+  header a { color:var(--muted); text-decoration:none; font-size:14px; }
+  header a:hover, header a.active { color:var(--accent); }
+  main { max-width:960px; margin:0 auto; padding:26px 22px 60px; }
+  h2 { font-size:20px; margin:0 0 4px; letter-spacing:-.01em; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:22px; }
+  .panel { background:var(--panel); border:1px solid var(--border);
+           border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  a.row { display:block; text-decoration:none; color:inherit; }
+  a.row:hover .panel { border-color:var(--accent); }
+  .flex { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:99px; border:1px solid var(--border);
+           color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .badge.done{color:var(--ok);border-color:var(--ok)}
+  .badge.error{color:var(--high);border-color:var(--high)}
+  .badge.running,.badge.queued{color:var(--accent);border-color:var(--accent)}
+  .sev { font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.04em; }
+  .sev.high{color:var(--high)} .sev.medium{color:var(--medium)} .sev.low{color:var(--low)}
+  code, pre { font-family:ui-monospace, "Cascadia Code", Consolas, monospace; font-size:13px; }
+  pre { background:var(--bg); border:1px solid var(--border); border-radius:8px;
+        padding:12px; overflow-x:auto; }
+  textarea, input[type=text] { width:100%; background:var(--bg); color:var(--text);
+        border:1px solid var(--border); border-radius:8px; padding:10px; font-size:14px; }
+  textarea { min-height:180px; font-family:ui-monospace, Consolas, monospace; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
+           padding:9px 18px; font-size:14px; font-weight:500; cursor:pointer; }
+  button:hover { filter:brightness(1.08); }
+  label { display:block; font-size:13px; color:var(--muted); margin:14px 0 5px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .err { color:var(--high); font-size:13px; margin-bottom:10px; }
+  .loc { color:var(--accent); }
+  .empty { text-align:center; color:var(--muted); padding:50px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>repo-reviewer</h1>
+  <a href="{{ url_for('dashboard.index') }}">Runs</a>
+  <a href="{{ url_for('dashboard.new_review') }}">New review</a>
+  <a href="{{ url_for('dashboard.new_ask') }}">Ask</a>
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>
