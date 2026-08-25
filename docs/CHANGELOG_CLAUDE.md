@@ -140,6 +140,7 @@ engineering · **(ML)** machine learning · **(RAG/Agents)** applied AI.
 | 14 | Graded the reviewer; hardened the failovers | Precision vs recall; injection defense; an eval that measured the wrong thing |
 | 15 | First live PR on real code — caught a cross-file bug | Integration gaps: 73 tests missed what one real API call found |
 | 16 | Gave it a web dashboard | Async jobs behind a web UI; sharing one worker without jobs eating each other |
+| 17 | Shipped it as a GitHub Action + wrote the README | Distribution as a product decision; caching turns incremental indexing into CI speed |
 
 ---
 
@@ -1215,3 +1216,86 @@ auth, multi-tenancy, or a persistent broker. What would break first under real
 multi-user load, in order: local CPU embeddings (~30s/repo, does not parallelize),
 free-tier LLM quotas (exhausted three times in one day by *one* user), and the
 in-process queue (dies with the process).
+
+---
+
+## 2026-08-25 — Session 9 (Phase 6): Distribution
+
+### 17. Packaged the reviewer as a GitHub Action, and wrote the README
+
+**In plain terms:** until now, the reviewer only ran if *you* started it on *your*
+computer. Now it can live inside GitHub itself: anyone copies one small file into
+their repository, adds their API keys as secrets, and every future pull request gets
+reviewed automatically — no server, no tunnel, nobody's laptop involved. The README
+was also rewritten as the project's front door, leading with the real bug it caught
+on somebody else's codebase.
+
+**What:** `action.yml` (a reusable composite GitHub Action),
+`docs/templates/ai-review.yml` (the file users copy into their repo), and a rewritten
+`README.md`. 85 tests still passing.
+
+**Why Action mode instead of the build plan's Docker-first path.** Docker was not
+installed on this machine, the embedding model turned out to be **4.3GB** (not the
+2GB assumed — measured, not guessed), and a self-hosted webhook demo only works while
+the host machine is running. An Action inverts all three: GitHub provides the compute,
+the demo is permanently live, and a stranger reproduces it by copying one file. The
+build plan lists this as a "bonus"; on this setup it is the stronger primary path.
+Docker packaging remains a documented option, not a pretended one.
+
+**The caching insight.** Three caches make CI practical, and the middle one matters
+most: restoring `~/.cache/repo-reviewer` between runs means the **Phase 1 incremental
+indexer re-embeds only the files this PR changed** instead of the whole repository
+every time. Work built for webhook latency turned out to be exactly what makes CI
+cheap — the cache key includes the commit sha so each run saves a fresh entry, while
+`restore-keys` falls back to the most recent prior index.
+
+**Safety carried into CI by construction:** `GITHUB_ALLOWED_REPOS` is pinned to
+`${{ github.repository }}`, so the action can only ever act on the repo it is running
+in; the workflow requests only `contents: read` + `pull-requests: write`; and the
+client still has no approve/merge methods, so that write permission cannot be
+escalated into an approval. Default is `dry-run: true`.
+
+**Verified before shipping:** config resolves correctly from environment variables
+with **no `.env` file present** — precisely the CI condition, and something no test
+had ever covered. Every internal README link was checked to resolve, and every number
+in it was checked against the generated benchmark files rather than retyped.
+
+**A recurring failure, now a rule.** Three `str.replace`-based edits silently did
+nothing this session, and one wrote a literal `\n` into the YAML. Root cause:
+`action.yml` had **CRLF** line endings, so patterns containing `\n` never matched.
+This is the third session where a programmatic edit reported success while changing
+nothing (entries 13 and 15). The rule is now firm: **after any scripted edit, verify
+the artifact — grep for the new symbol, or re-parse the file — never trust the
+script's own success message.** The Edit tool, which fails loudly on a non-match, is
+the better instrument whenever the exact text is known.
+
+> 💡 **(SE) Distribution is a design decision, not an afterthought.** The same engine
+> can ship as a CLI, a webhook service, a web dashboard, or a CI action — and the
+> choice determines who can actually use it. A webhook needs a public URL and an
+> always-on host; an Action needs neither, because the CI platform supplies both.
+> Choosing the delivery mechanism that removes the most prerequisites from the user is
+> usually worth more than another feature. Note what made this cheap: the core was
+> already a library with injected dependencies, so "shipping it four ways" meant four
+> thin entry points, not four implementations.
+
+> 💡 **(SE) Caching is about the second run.** A cold CI run downloads 4.3GB of model
+> weights and embeds every file; a warm one restores both and embeds only what
+> changed. The design question is always *what is stable across runs?* — model
+> weights (fully stable, key on the model name), dependencies (stable per lockfile,
+> key on its hash), and the index (mostly stable, key on the commit with a fallback to
+> the newest prior). Get the key granularity wrong in either direction and you either
+> never hit the cache or serve stale data.
+
+> 💡 **(SE) A README is an argument, not an inventory.** The rewrite leads with the
+> real finding on third-party code, because the strongest claim a tool can make is
+> "here is a bug I caught that a diff-only reviewer could not." Then the mechanism,
+> then the numbers with their caveats stated plainly — including the two false
+> positives and the earlier benchmark result where our hybrid search *lost*. Reporting
+> the failures is what makes the successes credible; a page of only good news reads as
+> marketing, and engineers discount it accordingly.
+
+**Remaining for Phase 6:** the action cannot execute until `repo-reviewer` is pushed
+(GitHub resolves `uses:` from the published repo), the workflow file is added to the
+target repo, and three secrets are set. Then PR #1 re-triggers and the whole loop runs
+inside GitHub. Optional afterwards: Docker packaging for a second deployment mode, and
+the demo recording.
