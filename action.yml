@@ -1,0 +1,90 @@
+name: "repo-reviewer"
+description: "AST-aware AI code review with cross-file context. Posts inline PR comments; never approves or merges."
+author: "RajvardhanJhala"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  gemini-api-key:
+    description: "Google AI Studio key (quality lane). At least one provider key is required."
+    required: false
+    default: ""
+  groq-api-key:
+    description: "Groq key (fast lane)."
+    required: false
+    default: ""
+  openrouter-api-key:
+    description: "OpenRouter key (fallback lane)."
+    required: false
+    default: ""
+  github-token:
+    description: "Token used to read the PR and post comments. Pass secrets.GITHUB_TOKEN."
+    required: true
+  dry-run:
+    description: "true = log comments without posting. Start here; flip to false once you trust it."
+    required: false
+    default: "true"
+  python-version:
+    description: "Python version for the reviewer."
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # The embedding model is ~4.3GB. Cached, only the first run on a repo pays
+    # the download; later runs restore in seconds. Keyed on the model name so a
+    # model change invalidates cleanly.
+    - name: Cache embedding model
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/huggingface
+        key: repo-reviewer-hf-bge-m3-v1
+        restore-keys: repo-reviewer-hf-
+
+    # Restoring the previous index lets the incremental indexer re-embed only the
+    # files this PR changed, instead of the whole repo every run. Key includes the
+    # sha so each run writes a fresh entry; restore-keys picks up the latest prior.
+    - name: Cache code index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/repo-reviewer
+        key: repo-reviewer-index-${{ github.repository }}-${{ github.sha }}
+        restore-keys: repo-reviewer-index-${{ github.repository }}-
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: repo-reviewer-pip-${{ inputs.python-version }}-${{ hashFiles('${{ github.action_path }}/requirements.txt') }}
+        restore-keys: repo-reviewer-pip-${{ inputs.python-version }}-
+
+    - name: Install reviewer
+      shell: bash
+      run: pip install --disable-pip-version-check -q -r "$GITHUB_ACTION_PATH/requirements.txt"
+
+    - name: Review pull request
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        PYTHONIOENCODING: utf-8
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        GROQ_API_KEY: ${{ inputs.groq-api-key }}
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        # The action may only ever act on the repo it is running in.
+        GITHUB_ALLOWED_REPOS: ${{ github.repository }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        LOG_LEVEL: INFO
+      run: |
+        python -m review \
+          --pr "${{ github.event.pull_request.number }}" \
+          --gh-repo "${{ github.repository }}" \
+          --repo "${{ github.workspace }}" \
+          --data "$HOME/.cache/repo-reviewer/index"

@@ -1,0 +1,38 @@
+# Copy this file into your repository as .github/workflows/ai-review.yml
+#
+# Then add repository secrets (Settings -> Secrets and variables -> Actions):
+#   GEMINI_API_KEY      https://aistudio.google.com
+#   GROQ_API_KEY        https://console.groq.com
+#   OPENROUTER_API_KEY  https://openrouter.ai   (optional fallback)
+#
+# It starts in dry-run: the review appears in the Actions log, nothing is posted.
+# Flip dry-run to "false" once you have watched a few runs and trust the output.
+
+name: AI Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read          # read the code being reviewed
+  pull-requests: write    # post review comments (never approve or merge)
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v4
+        with:
+          # Review the proposed code itself, not GitHub's merge preview commit.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Run repo-reviewer
+        uses: RajvardhanJhala/repo-reviewer@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          groq-api-key: ${{ secrets.GROQ_API_KEY }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          dry-run: "true"
