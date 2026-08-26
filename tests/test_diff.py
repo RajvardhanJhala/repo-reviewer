@@ -1,5 +1,7 @@
 """The fiddly part GitHub punishes you for: exact new-file line mapping."""
+import os
 import textwrap
+from pathlib import Path
 
 from review.diff import commentable_lines, parse_diff
 
@@ -125,3 +127,39 @@ def test_build_diff_uses_previous_filename_for_renames():
 def test_build_diff_skips_binary_files():
     from gh.client import build_diff
     assert build_diff([FakeGHFile("logo.png", None)]) == ""
+
+
+def test_cli_survives_a_repo_with_its_own_config_module(tmp_path):
+    """Regression: the reviewed repo must never shadow our modules.
+
+    A repo with its own config.py at the root (extremely common — Flask, Django,
+    countless others) broke the first real GitHub Action run with
+    `ImportError: cannot import name 'settings' from 'config'`, because Python puts
+    the working directory first on sys.path. The reviewer must run from its own
+    directory and treat the reviewed repo purely as data.
+    """
+    import subprocess
+    import sys
+
+    (tmp_path / "config.py").write_text("DEBUG = True\n", encoding="utf-8")   # the decoy
+    repo_root = Path(__file__).resolve().parent.parent
+    env = {**os.environ, "PYTHONPATH": str(repo_root)}
+
+    def import_settings_from(cwd):
+        # PYTHONPATH is identical in both runs, so cwd is the only variable.
+        return subprocess.run([sys.executable, "-c", "from config import settings"],
+                              cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+    # The bug: cwd inside the reviewed repo puts its config.py first on sys.path.
+    broken = import_settings_from(tmp_path)
+    assert broken.returncode != 0
+    assert "cannot import name 'settings'" in broken.stderr
+
+    # The fix: run from our own directory; the reviewed repo is data, not cwd.
+    fixed = import_settings_from(repo_root)
+    assert fixed.returncode == 0, fixed.stderr
+
+    # And the CLI itself still starts from there.
+    cli = subprocess.run([sys.executable, "-m", "review", "--help"],
+                         cwd=repo_root, env=env, capture_output=True, text=True, timeout=120)
+    assert cli.returncode == 0 and "--pr" in cli.stdout

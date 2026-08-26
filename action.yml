@@ -71,6 +71,11 @@ runs:
 
     - name: Review pull request
       shell: bash
+      # Run from the ACTION's directory, not the checkout. Python puts the working
+      # directory first on sys.path, so running inside the reviewed repo lets that
+      # repo's own config.py / api.py / tests.py shadow ours (this broke on the very
+      # first real run). The reviewed repo is data, passed via --repo, never cwd.
+      working-directory: ${{ github.action_path }}
       env:
         PYTHONPATH: ${{ github.action_path }}
         PYTHONIOENCODING: utf-8
